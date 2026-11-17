@@ -67,7 +67,7 @@ service cloud.firestore {
         && request.resource.data.data.get('notifications', []) is list
         && request.resource.data.data.get('prismaAi', {}) is map
         && request.resource.data.updatedAt == request.time
-        && request.resource.data.revision is string;
+        && request.resource.data.revision is int;
     }
 
     function validConsent() {
