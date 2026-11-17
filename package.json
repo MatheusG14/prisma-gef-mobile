@@ -23,6 +23,6 @@
     "backup": "node scripts/backup-sqlite.js"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": "^22.13.0"
   }
 }
