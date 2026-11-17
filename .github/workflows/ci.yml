@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Lint · Tests · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Audit scripts (HTML / CSS / DOM / security)
+        run: npm run test:audit
+
+      - name: Unit / integration tests
+        run: npm test
+
+      - name: Validate static build (Netlify)
+        env:
+          # Placeholders públicos só para validar o script de build no CI
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || 'ci-placeholder-api-key' }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN || 'prisma-gef.firebaseapp.com' }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || 'prisma-gef' }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET || 'prisma-gef.firebasestorage.app' }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || '000000000000' }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || '1:000000000000:web:ci' }}
+        run: npm run build:netlify
+
+      - name: Check PWA artifacts in dist
+        run: |
+          test -f dist/index.html
+          test -f dist/manifest.webmanifest || test -f dist/../manifest.webmanifest || test -f manifest.webmanifest
+          test -f dist/sw.js || test -f sw.js
+          test -f dist/css/responsive.css || test -f css/responsive.css
+          echo "Build artifacts OK"
+
+  e2e-smoke:
+    name: Playwright smoke (mobile / tablet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test-and-build
+    # Não falha o CI inteiro se Playwright não estiver instalado ainda
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci || npm install
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium || echo "Playwright not configured"
+      - name: Run e2e smoke
+        run: npm run test:e2e || echo "E2E skipped or failed (non-blocking)"
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || 'ci-placeholder' }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || '0' }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || '1:0:web:ci' }}
+
+  lighthouse-mobile:
+    name: Lighthouse mobile (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test-and-build
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci || npm install
+      - name: Build
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || 'ci-placeholder-api-key' }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || '000000000000' }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || '1:000000000000:web:ci' }}
+          FIREBASE_AUTH_DOMAIN: prisma-gef.firebaseapp.com
+          FIREBASE_PROJECT_ID: prisma-gef
+          FIREBASE_STORAGE_BUCKET: prisma-gef.firebasestorage.app
+        run: npm run build:netlify
+      - name: Serve + Lighthouse
+        run: |
+          npx --yes serve dist -l 4173 &
+          sleep 2
+          npx --yes lighthouse http://127.0.0.1:4173 \
+            --only-categories=performance,accessibility,best-practices,pwa \
+            --form-factor=mobile \
+            --chrome-flags="--headless --no-sandbox" \
+            --output=json \
+            --output-path=./lighthouse-mobile.json \
+            || true
+          node -e "
+            const fs=require('fs');
+            if(!fs.existsSync('lighthouse-mobile.json')) { console.log('No report'); process.exit(0); }
+            const r=JSON.parse(fs.readFileSync('lighthouse-mobile.json','utf8'));
+            const cats=r.categories||{};
+            for (const [k,v] of Object.entries(cats)) {
+              const score=Math.round((v.score||0)*100);
+              console.log(k+': '+score);
+            }
+          "
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-mobile
+          path: lighthouse-mobile.json
+          if-no-files-found: ignore

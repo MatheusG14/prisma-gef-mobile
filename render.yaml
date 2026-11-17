@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: prisma-gef-api
+    runtime: node
+    plan: starter            # disco persistente exige plano pago
+    region: oregon           # ajuste para a região mais próxima dos usuários
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: prisma-gef-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION    # node:sqlite sem flag exige >= 22.13
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /var/data/prisma.sqlite
+      - key: BACKUP_DIR
+        value: /var/data/backups
+      - key: BACKUP_INTERVAL_HOURS
+        value: 24
+      - key: BACKUP_KEEP
+        value: 14
+      - key: TRUST_PROXY_HOPS   # Vercel (proxy) -> Render: 2 saltos
+        value: 2
+      - key: SESSION_TTL_DAYS
+        value: 30
+      - key: FIREBASE_PROJECT_ID
+        value: prisma-gef
+      - key: ALLOWED_ORIGINS    # ex.: https://seu-app.vercel.app,https://www.seudominio.com
+        sync: false
+      - key: APP_BASE_URL       # URL pública do frontend (links de reset de senha)
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: EMAIL_PROVIDER
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_SECURE
+        sync: false

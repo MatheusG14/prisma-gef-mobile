@@ -1,0 +1,28 @@
+{
+  "name": "prisma-gestao-financeira",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Prisma GEF — frontend estático Vercel e backend Node/SQLite com disco persistente",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build:netlify": "node scripts/build-netlify.js",
+    "cap:sync": "npx cap sync",
+    "cap:android": "npx cap open android",
+    "cap:add:android": "npx cap add android",
+    "test": "node --test tests/audit-backend-security.js tests/audit-dom-ids.js tests/audit-css-files.js tests/audit-html-screens.js tests/prisma-dashboard-grandcard.test.js tests/prisma-education-pdf-viewer.test.js tests/prisma-full-flow.test.js tests/prisma-production.test.js",
+    "test:auth": "node --test tests/prisma-full-flow.test.js",
+    "test:audit": "node tests/audit-backend-security.js && node tests/audit-dom-ids.js && node tests/audit-css-files.js && node tests/audit-html-screens.js",
+    "test:e2e": "npx playwright test",
+    "test:e2e:install": "npx playwright install --with-deps chromium",
+    "lint": "npm run test:audit",
+    "lighthouse:mobile": "npx --yes lighthouse http://127.0.0.1:4173 --only-categories=performance,accessibility,best-practices,pwa --form-factor=mobile --chrome-flags=\"--headless --no-sandbox\" --view",
+    "smoke": "node scripts/smoke-structural.js",
+    "build": "node scripts/build-netlify.js",
+    "backup": "node scripts/backup-sqlite.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
