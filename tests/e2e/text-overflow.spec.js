@@ -147,6 +147,51 @@ async function collectLayoutIssues(page, scopeSelector, screenName, width) {
   }, { scopeSelector, screenName, width, cardSelector });
 }
 
+async function collectDashboardWordIssues(page, width) {
+  return page.evaluate(({ width }) => {
+    const dashboard = document.getElementById('dashboard');
+    if (!dashboard) return [];
+
+    const issues = [];
+    const isVisible = (element) => element.getClientRects().length > 0 &&
+      getComputedStyle(element).visibility !== 'hidden';
+    const cards = dashboard.querySelectorAll(
+      '.card, .grand-module-item, .dashboard-empty, .overview-metric-card'
+    );
+
+    for (const card of cards) {
+      if (!isVisible(card)) continue;
+      const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+      let node;
+
+      while ((node = walker.nextNode())) {
+        if (!node.nodeValue.trim() || !isVisible(node.parentElement)) continue;
+
+        for (const match of node.nodeValue.matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(node, match.index);
+          range.setEnd(node, match.index + match[0].length);
+          const lines = new Set(Array.from(range.getClientRects())
+            .filter((rect) => rect.width > 0 && rect.height > 0)
+            .map((rect) => Math.round(rect.top)));
+
+          if (lines.size > 1) {
+            issues.push({
+              type: 'dashboard-word-split',
+              element: card.className,
+              text: match[0],
+              screenName: 'dashboard',
+              width
+            });
+          }
+        }
+      }
+    }
+
+    return issues;
+  }, { width });
+}
+
 async function collectTabIssues(page, scopeSelector, screenName, width) {
   const tabs = page.locator(`${scopeSelector} [role="tab"]`);
   const issues = [];
@@ -157,6 +202,29 @@ async function collectTabIssues(page, scopeSelector, screenName, width) {
     await tab.evaluate((element) => element.click());
     issues.push(...await collectLayoutIssues(page, scopeSelector, screenName, width));
   }
+
+  return issues;
+}
+
+async function inspectDashboardLongValues(page, width) {
+  const values = page.locator('#dashboard .stat-card:not([data-kpi="score"]) .stat-value');
+  const previousValues = await values.evaluateAll((elements) =>
+    elements.map((element) => element.textContent));
+
+  await values.evaluateAll((elements) => {
+    elements.forEach((element) => {
+      element.textContent = 'R$ 999.999.999.999,99';
+    });
+  });
+
+  const issues = await collectLayoutIssues(page, '#dashboard', 'dashboard long values', width);
+  issues.push(...await collectDashboardWordIssues(page, width));
+
+  await values.evaluateAll((elements, originalValues) => {
+    elements.forEach((element, index) => {
+      element.textContent = originalValues[index];
+    });
+  }, previousValues);
 
   return issues;
 }
@@ -299,6 +367,9 @@ test('screen and dialog text fits buttons, cards, and viewport', async ({ page }
       }, sectionId);
       allIssues.push(...await collectLayoutIssues(page, `#${sectionId}`, sectionId, width));
       allIssues.push(...await collectTabIssues(page, `#${sectionId}`, sectionId, width));
+      if (sectionId === 'dashboard') {
+        allIssues.push(...await inspectDashboardLongValues(page, width));
+      }
       if (sectionId === 'prisma-ai') {
         allIssues.push(...await inspectAiDrawer(page, width));
       }

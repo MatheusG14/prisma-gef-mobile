@@ -1384,3 +1384,57 @@ table {
     min-height: 88px !important;
   }
 }
+
+@media (max-width: 768px) {
+  #dashboard .stat-card .stat-value {
+    font-size: clamp(0.75rem, 3vw, 0.8rem) !important;
+    white-space: nowrap !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+  }
+
+  #dashboard .stat-card .stat-label,
+  #dashboard .stat-card .stat-detail,
+  #dashboard .grand-module-item :is(h2, h3, h4, p, span, strong, small),
+  #dashboard .dashboard-empty :is(h2, h3, h4, p, span, strong, small),
+  #dashboard .dash-insight-discreet-pill,
+  #dashboard .monitoring-title-row h3,
+  #dashboard .monitoring-kicker,
+  #dashboard .monitoring-subtitle {
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+  }
+
+  #dashboard #dashScoreRingWrap {
+    gap: 8px;
+  }
+
+  #dashboard .score-ring-label {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  #dashboard .score-ring-label .score-class {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    font-size: clamp(0.5625rem, 2.4vw, 0.625rem) !important;
+    letter-spacing: 0.02em !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+  }
+}
+
+@media (max-width: 360px) {
+  #dashboard #dashScoreRingWrap {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  #dashboard .score-ring-label {
+    width: 100%;
+    text-align: center;
+  }
+}
