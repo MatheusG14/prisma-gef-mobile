@@ -13575,7 +13575,27 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(async () => {
       hideAiTyping();
 
-      if (qLower.includes('analisar') || qLower.includes('gasto') || qLower.includes('análise')) {
+      if (typeof window.PrismaAiEngine?.generateAnswer === 'function') {
+        const engineResult = window.PrismaAiEngine.generateAnswer(question, {
+          receitas: Array.isArray(receitas) ? receitas : [],
+          despesas: Array.isArray(despesas) ? despesas : [],
+          contas: Array.isArray(contas) ? contas : [],
+          investimentos: Array.isArray(investimentos) ? investimentos : [],
+          cartoes: Array.isArray(cartoes) ? cartoes : [],
+          goals: Array.isArray(goals) ? goals : [],
+          periodLabel: aiActivePeriod === '30d' ? 'nos últimos 30 dias' : aiActivePeriod === '90d' ? 'nos últimos 90 dias' : 'neste período'
+        });
+        addBotMessage(engineResult.text);
+        if (engineResult.action?.type === 'generate_pdf') {
+          generateAIPDF();
+        } else if (engineResult.action?.section) {
+          const sectionLink = engineResult.action.section;
+          setTimeout(() => {
+            const target = document.querySelector(`[data-section="${sectionLink}"]`);
+            if (target) target.click();
+          }, 400);
+        }
+      } else if (qLower.includes('analisar') || qLower.includes('gasto') || qLower.includes('análise')) {
         const res = await runPrismaAiAnalysis(aiActivePeriod, { showBotMessage: false });
         if (res) {
           renderProgressiveAnalysisChat(res.analysis, res.recommendations, res.consolidated);
