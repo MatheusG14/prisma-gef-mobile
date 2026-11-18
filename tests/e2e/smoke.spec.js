@@ -36,14 +36,12 @@ test.describe('Prisma smoke – mobile/tablet', () => {
     expect(hasAuthUi).toBeTruthy();
   });
 
-  test('bottom-nav presente no DOM (mobile)', async ({ page }) => {
+  test('bottom-nav removida; menu lateral continua disponível no mobile', async ({ page }) => {
     await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
     const bottomNav = page.locator('#bottomNav, .bottom-nav');
-    await expect(bottomNav).toHaveCount(1);
-    // Itens com data-section principais
-    for (const section of ['dashboard', 'receitas', 'despesas', 'configuracoes']) {
-      await expect(page.locator(`.bottom-nav [data-section="${section}"]`)).toHaveCount(1);
-    }
+    await expect(bottomNav).toHaveCount(0);
+    await expect(page.locator('#mobileMenu')).toHaveCount(1);
+    await expect(page.locator('#sidebar [data-section="dashboard"]')).toHaveCount(1);
   });
 
   test('service worker script acessível', async ({ request, baseURL }) => {

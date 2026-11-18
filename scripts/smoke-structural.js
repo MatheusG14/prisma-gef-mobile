@@ -51,9 +51,9 @@ mustExist('vercel.json');
 
 fileIncludes('index.html', 'viewport-fit=cover');
 fileIncludes('index.html', 'responsive.css');
-fileIncludes('index.html', 'bottom-nav');
 fileIncludes('index.html', 'manifest.webmanifest');
 fileIncludes('index.html', 'prisma-pwa.js');
+fileIncludes('index.html', 'id="mobileMenu"');
 fileIncludes('js/firebase-client.js', 'inMemoryPersistence');
 fileIncludes('js/firebase-client.js', 'persistentLocalCache');
 fileIncludes('sw.js', 'SHELL_CACHE');
@@ -69,8 +69,11 @@ const sections = [
 const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 for (const s of sections) {
   if (!indexHtml.includes(`data-section="${s}"`)) {
-    errors.push(`bottom-nav/sidebar sem data-section=${s}`);
+    errors.push(`sidebar sem data-section=${s}`);
   }
+}
+if (indexHtml.includes('class="bottom-nav"') || indexHtml.includes('id="bottomNav"')) {
+  errors.push('index.html ainda contém a navegação inferior');
 }
 
 console.log('=== Smoke estrutural Prisma GEF ===');
