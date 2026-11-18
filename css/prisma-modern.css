@@ -6900,13 +6900,15 @@ body.modal-module-open {
 #carteira-ativos .carteira-distribution-body {
   display: grid;
   grid-template-columns: minmax(200px, 280px) minmax(0, 1fr);
+  grid-template-areas: "chart legend";
   gap: 1.25rem 1.75rem;
   align-items: center;
 }
 
 @media (max-width: 860px) {
   #carteira-ativos .carteira-distribution-body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "chart" "legend";
   }
 }
 

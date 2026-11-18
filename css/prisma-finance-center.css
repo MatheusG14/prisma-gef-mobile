@@ -1181,6 +1181,21 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  #centro-financeiro .cf-planning .cf-section-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    justify-content: initial;
+    gap: 0.25rem;
+  }
+
+  #centro-financeiro .cf-planning .cf-section-heading > * {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
   #centro-financeiro .cf-portal-card {
     min-height: 0;
   }

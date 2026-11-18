@@ -114,12 +114,6 @@ table {
   }
 }
 
-@media (min-width: 651px) {
-  #educacao-financeira .education-course-actions > .btn {
-    flex: 0 0 auto;
-  }
-}
-
 @media (min-width: 769px) and (max-width: 1024px) {
   #investimentos .investment-hero > #addInvestimentoBtn {
     flex-shrink: 0;
@@ -200,7 +194,7 @@ canvas {
   .investments-grid,
   .profiles-grid,
   .settings-grid,
-  [class*="-grid"] {
+  [class*="-grid"]:not(.ai-smart-actions-grid) {
     grid-template-columns: 1fr !important;
   }
 
@@ -737,10 +731,11 @@ canvas {
   #prisma-ai .ai-period-selector {
     display: flex;
     flex: 1 1 100%;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-self: stretch;
     max-width: 100%;
     min-width: 0;
+    overflow-x: auto;
   }
 
   #prisma-ai .ai-period-btn {

@@ -3011,39 +3011,161 @@ body {
   min-height: calc(100dvh - 160px);
   padding: 24px !important;
   gap: 20px;
-  background: var(--color-bg-card) !important;
-  border: 1px solid var(--color-border) !important;
-  border-radius: var(--radius-md) !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.96), rgba(8, 12, 20, 0.98)) !important;
+  border: 1px solid rgba(148, 163, 184, 0.16) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24) !important;
 }
 
 #prisma-ai .ai-smart-header {
-  align-items: flex-start;
-  gap: 20px;
-  padding-bottom: 18px;
-  margin-bottom: 24px !important;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 0 !important;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+#prisma-ai .ai-brand-avatar {
+  display: grid;
+  flex: 0 0 48px;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 14px;
+  background: rgba(37, 99, 235, 0.1);
+}
+
+#prisma-ai .ai-brand-avatar img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+#prisma-ai .ai-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#prisma-ai .ai-title-row h2 {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+#prisma-ai .ai-title-row .status-live {
+  flex: 0 0 auto;
 }
 
 #prisma-ai .ai-header-controls {
-  display: grid;
-  grid-template-columns: repeat(5, max-content);
-  justify-content: end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   min-width: 0;
 }
 
 #prisma-ai .ai-period-selector {
-  grid-column: 1 / -1;
-  justify-self: end;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 11px;
+  background: rgba(2, 6, 23, 0.38);
+}
+
+#prisma-ai .ai-period-btn {
+  min-width: 36px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  font-weight: 650;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+#prisma-ai .ai-period-btn:hover,
+#prisma-ai .ai-period-btn.active {
+  background: rgba(37, 99, 235, 0.22);
+  color: #dbeafe;
 }
 
 #prisma-ai .ai-header-controls>.btn,
 #prisma-ai .ai-header-controls>.ai-plan-btn {
   min-height: 36px;
   padding: 8px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.06);
+  color: #cbd5e1;
   white-space: nowrap;
   margin: 0 !important;
   align-self: center;
+}
+
+#prisma-ai .ai-smart-actions-container {
+  margin: 0;
+}
+
+#prisma-ai .ai-smart-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#prisma-ai .ai-smart-action-btn {
+  display: flex;
+  min-width: 0;
+  min-height: 82px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.56);
+  color: #dbe4f0;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: center;
+  transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
+}
+
+#prisma-ai .ai-smart-action-btn span {
+  display: block;
+  min-width: 0;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+#prisma-ai .ai-smart-action-btn i,
+#prisma-ai .ai-smart-action-btn svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #60a5fa;
+}
+
+#prisma-ai .ai-smart-action-btn:hover,
+#prisma-ai .ai-smart-action-btn:focus-visible,
+#prisma-ai .ai-smart-action-btn.active,
+#prisma-ai .ai-smart-action-btn[aria-pressed="true"] {
+  transform: translateY(-1px);
+  border-color: rgba(96, 165, 250, 0.42);
+  background: rgba(37, 99, 235, 0.14);
 }
 
 #prisma-ai .ai-header-controls>.ai-analyze-btn {
@@ -3052,15 +3174,33 @@ body {
 
 #prisma-ai .ai-conversational-workspace {
   min-width: 0;
-  min-height: clamp(480px, 62dvh, 680px);
-  background: var(--color-bg-main);
-  border-color: var(--color-border);
+  min-height: clamp(380px, 52dvh, 560px);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  background: rgba(8, 12, 20, 0.62);
+}
+
+#prisma-ai .ai-msg .ai-avatar {
+  border-color: rgba(96, 165, 250, 0.22);
+  background: rgba(37, 99, 235, 0.12);
+}
+
+#prisma-ai .ai-msg.bot .bubble {
+  border-color: rgba(148, 163, 184, 0.15);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.88);
+}
+
+#prisma-ai .ai-msg.user .bubble {
+  border-radius: 14px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
 }
 
 #prisma-ai .ai-chat {
   min-width: 0;
-  min-height: 260px;
+  min-height: 220px;
   max-height: none;
+  padding: 18px;
   flex: 1 1 auto;
 }
 
@@ -3078,9 +3218,25 @@ body {
   margin-bottom: 0;
 }
 
+#prisma-ai .ai-quick-btn {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(148, 163, 184, 0.06);
+  color: #cbd5e1;
+  white-space: normal;
+}
+
+#prisma-ai .ai-quick-btn:hover,
+#prisma-ai .ai-quick-btn:focus-visible {
+  border-color: rgba(96, 165, 250, 0.4);
+  background: rgba(37, 99, 235, 0.12);
+  color: #eff6ff;
+}
+
 #prisma-ai .ai-input-wrap {
   flex-shrink: 0;
   padding: 12px 16px max(16px, env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(8, 12, 20, 0.58);
 }
 
 #prisma-ai .ai-input-wrap .ai-chip {
@@ -3102,7 +3258,20 @@ body {
 #prisma-ai .ai-input-wrap .ai-input input {
   min-width: 0;
   min-height: 42px;
-  border-color: var(--color-border);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #f8fafc;
+}
+
+#prisma-ai .ai-input-wrap .ai-input button {
+  display: grid;
+  flex: 0 0 42px;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 12px;
 }
 
 #prisma-ai .ai-input-wrap .ai-input input:focus-visible,
@@ -3115,13 +3284,16 @@ body {
 
 @media (max-width: 900px) {
   #prisma-ai .ai-header-controls {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
+    justify-content: flex-start;
+  }
+
+  #prisma-ai .ai-smart-actions-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   #prisma-ai .ai-period-selector {
     width: 100%;
-    justify-self: stretch;
   }
 
   #prisma-ai .ai-period-btn {
@@ -3130,6 +3302,7 @@ body {
 
   #prisma-ai .ai-header-controls>.btn,
   #prisma-ai .ai-header-controls>.ai-plan-btn {
+    flex: 1 1 120px;
     width: 100%;
     justify-content: center;
   }
@@ -3141,8 +3314,9 @@ body {
 
 @media (max-width: 600px) {
   #prisma-ai .ai-main-card {
-    padding: 16px !important;
-    gap: 16px;
+    min-height: 0;
+    padding: 14px !important;
+    gap: 14px;
   }
 
   #prisma-ai .ai-brand-group {
@@ -3163,11 +3337,33 @@ body {
 
   #prisma-ai .ai-chat {
     padding-inline: 14px;
+    min-height: 170px;
+  }
+
+  #prisma-ai .ai-conversational-workspace {
+    min-height: clamp(320px, 46dvh, 430px);
+  }
+
+  #prisma-ai .ai-smart-actions-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #prisma-ai .ai-smart-action-btn {
+    min-height: 76px;
+    padding: 10px 8px;
+    font-size: 0.76rem;
+  }
+
+  #prisma-ai .ai-smart-action-btn:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: calc((100% - 8px) / 2);
   }
 
   #prisma-ai .ai-period-selector {
     gap: 2px;
-    overflow: hidden;
+    overflow: visible;
   }
 
   #prisma-ai .ai-period-btn {

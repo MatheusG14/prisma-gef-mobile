@@ -3,7 +3,7 @@
  * Cache do app shell (HTML/CSS/JS/ícones estáticos).
  * NÃO cacheia dados de usuário, Firestore, Auth nem APIs sensíveis.
  */
-const CACHE_VERSION = 'prisma-shell-v3-20261118-phase5-v1';
+const CACHE_VERSION = 'prisma-shell-v3-20261118-search-toggle-row-v1';
 const SHELL_CACHE = CACHE_VERSION;
 
 const APP_SHELL = [
