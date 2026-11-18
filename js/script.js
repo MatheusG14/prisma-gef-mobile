@@ -16050,10 +16050,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const STORAGE_KEY = 'prisma_notifications_v2';
     const button = document.getElementById('notificationBtn') || document.querySelector('.notification-btn');
     const panel = document.getElementById('notificationsPanel');
+    if (panel && panel.parentElement !== document.body) document.body.appendChild(panel);
     const list = document.getElementById('notificationsList');
     const empty = document.getElementById('notificationsEmpty');
     const summary = document.getElementById('notificationsSummary');
     const markRead = document.getElementById('markNotificationsRead');
+    const closeButton = panel?.querySelector('.notifications-close');
     let currentView = 'active';
     let toolbar;
     let activeTab;
@@ -16290,6 +16292,13 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
     if (markRead) markRead.addEventListener('click', e => { e.preventDefault(); markAllRead(); });
+    if (closeButton) closeButton.addEventListener('click', () => {
+      if (window.PrismaNavbar) window.PrismaNavbar.close('notifications', { restoreFocus: true });
+      else {
+        closePanel();
+        button?.focus();
+      }
+    });
     if (list) list.addEventListener('click', e => {
       const action = e.target.closest('[data-notification-action]');
       if (action) {
@@ -16318,6 +16327,7 @@ document.addEventListener('DOMContentLoaded', () => {
   (function initNavbarManager() {
     const searchBox = document.querySelector('.search-box');
     const searchInput = document.getElementById('globalSearchInput') || document.querySelector('.search-box input');
+    const searchToggle = document.getElementById('globalSearchToggle');
     const notificationBtn = document.getElementById('notificationBtn') || document.querySelector('.notification-btn');
     const notificationsPanel = document.getElementById('notificationsPanel');
     const mobileMenu = document.getElementById('mobileMenu') || document.querySelector('.mobile-menu');
@@ -16367,6 +16377,9 @@ document.addEventListener('DOMContentLoaded', () => {
           setExpanded(searchInput, false);
           if (document.activeElement === searchInput) searchInput.blur();
         }
+        if (document.activeElement === searchToggle) searchToggle.blur();
+        setExpanded(searchToggle, false);
+        if (searchToggle) searchToggle.setAttribute('aria-label', 'Abrir pesquisa');
         if (searchBox) searchBox.classList.remove('active');
         const results = document.getElementById('globalSearchResults');
         if (results) results.hidden = true;
@@ -16413,6 +16426,8 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (menu === 'search' && searchInput) {
         searchInput.classList.add('active');
         setExpanded(searchInput, true);
+        setExpanded(searchToggle, true);
+        if (searchToggle) searchToggle.setAttribute('aria-label', 'Fechar pesquisa');
         if (searchBox) searchBox.classList.add('active');
       } else if (menu === 'mobileMenu' && sidebar) {
         sidebar.classList.add('open', 'active');
@@ -16460,6 +16475,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.PrismaNavbar = { get activeMenu() { return activeMenu; }, open, close, closeAll: closeAllTopOverlays, toggle };
     window.closeAllTopOverlays = closeAllTopOverlays;
+
+    if (searchToggle) {
+      searchToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (activeMenu === 'search') {
+          close('search');
+        } else {
+          open('search');
+          requestAnimationFrame(() => searchInput?.focus());
+        }
+      });
+    }
 
     if (searchInput) {
       if (searchBox) {
@@ -16554,41 +16582,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     }
-  })();
-
-  (function applySquareDashboardGrid() {
-    function updateLayout() {
-      const grid = document.querySelector('#dashboard .dash-kpi-row');
-      if (!grid) return;
-      if (window.innerWidth <= 540) {
-        const available = Math.max(0, grid.clientWidth || window.innerWidth - 52);
-        const cardWidth = Math.max(120, Math.floor((available - 10) / 2));
-        grid.style.gridTemplateColumns = `${cardWidth}px ${cardWidth}px`;
-        grid.style.justifyContent = 'stretch';
-        grid.querySelectorAll(':scope > .stat-card').forEach((card) => {
-          card.style.width = `${cardWidth}px`;
-          card.style.maxWidth = `${cardWidth}px`;
-          card.style.height = `${cardWidth}px`;
-          card.style.minHeight = '0';
-        });
-      } else {
-        grid.style.gridTemplateColumns = '266px 266px';
-        grid.style.justifyContent = 'start';
-        grid.querySelectorAll(':scope > .stat-card').forEach((card) => {
-          card.style.width = '266px';
-          card.style.maxWidth = '266px';
-          card.style.height = '266px';
-          card.style.minHeight = '0';
-        });
-      }
-      grid.querySelectorAll(':scope > .stat-card').forEach((card) => {
-        card.style.aspectRatio = '1 / 1';
-        card.style.minHeight = '0';
-        card.style.height = 'auto';
-      });
-    }
-    updateLayout();
-    window.addEventListener('resize', updateLayout);
   })();
 
   /* =========================================================

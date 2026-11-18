@@ -9,7 +9,9 @@
             <span>Prisma</span>
           </a>
           <div class="search-box" id="globalSearchBox">
-            <i data-lucide="search"></i>
+            <button type="button" class="search-toggle" id="globalSearchToggle" aria-label="Abrir pesquisa" aria-expanded="false" aria-controls="globalSearchResults">
+              <i data-lucide="search"></i>
+            </button>
             <input type="search" id="globalSearchInput" placeholder="Pesquisar transações, contas, metas..." autocomplete="off" aria-label="Busca global" aria-expanded="false" aria-controls="globalSearchResults" />
             <button type="button" class="search-clear" id="globalSearchClear" title="Limpar" aria-label="Limpar pesquisa" hidden>
               <i data-lucide="x"></i>
@@ -32,6 +34,9 @@
                   <p id="notificationsSummary">Nenhuma notificação nova</p>
                 </div>
                 <button type="button" class="notifications-mark-read" id="markNotificationsRead">Marcar como lidas</button>
+                <button type="button" class="notifications-close" aria-label="Fechar central de notificações">
+                  <i data-lucide="x"></i>
+                </button>
               </div>
               <div class="notifications-list" id="notificationsList"></div>
               <div class="notifications-empty" id="notificationsEmpty">

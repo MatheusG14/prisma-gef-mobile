@@ -32,7 +32,7 @@
   <link rel="stylesheet" href="css/prisma-lgpd.css?v=20261103-welcome-fullscreen-brand-v5" />
   <link rel="stylesheet" href="css/prisma-dashboard-premium.css?v=20261111-auth-switch-layout-v2" />
   <link rel="stylesheet" href="css/responsive.css?v=20261118-responsive-fixes-v2" />
-  <link rel="stylesheet" href="css/prisma-mobile.css?v=20261118-mobile-architecture-v1" />
+  <link rel="stylesheet" href="css/prisma-mobile.css?v=20261119-search-dashboard-notifications-v1" />
 </head>
 <body>
 
@@ -582,7 +582,9 @@
             <i data-lucide="menu"></i>
           </button>
           <div class="search-box" id="globalSearchBox">
-            <i data-lucide="search"></i>
+            <button type="button" class="search-toggle" id="globalSearchToggle" aria-label="Abrir pesquisa" aria-expanded="false" aria-controls="globalSearchResults">
+              <i data-lucide="search"></i>
+            </button>
             <input type="search" id="globalSearchInput" placeholder="Pesquisar transações, contas, metas..." autocomplete="off" aria-label="Busca global" aria-expanded="false" aria-controls="globalSearchResults" />
             <button type="button" class="search-clear" id="globalSearchClear" title="Limpar" aria-label="Limpar pesquisa" hidden>
               <i data-lucide="x"></i>
@@ -605,6 +607,9 @@
                   <p id="notificationsSummary">Nenhuma notificação nova</p>
                 </div>
                 <button type="button" class="notifications-mark-read" id="markNotificationsRead">Marcar como lidas</button>
+                <button type="button" class="notifications-close" aria-label="Fechar central de notificações">
+                  <i data-lucide="x"></i>
+                </button>
               </div>
               <div class="notifications-list" id="notificationsList"></div>
               <div class="notifications-empty" id="notificationsEmpty">
@@ -4020,7 +4025,7 @@
   <script src="js/firebase-config.js"></script>
   <script type="module" src="js/firebase-client.js"></script>
   <script src="js/prisma-ai-engine.js?v=20261118-greeting-v2"></script>
-  <script src="js/script.js?v=20261118-cartoes-refine-v1" defer></script>
+  <script src="js/script.js?v=20261119-search-dashboard-notifications-v1" defer></script>
   <script src="js/prisma-enhancements.js?v=20261118-ai-ui-slim-v1" defer></script>
   <!-- Catálogo de ativos: sob demanda quando a seção de investimentos é usada -->
   <script src="js/prisma-assets-catalog.js?v=20260911-perf" defer></script>

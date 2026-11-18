@@ -723,8 +723,8 @@ table {
   max-width: 100%;
   text-align: left;
   white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 #dashboard .stat-card .stat-value {
@@ -880,4 +880,101 @@ table {
   #profileDropdown.profile-dropdown {
     width: calc(100vw - 24px) !important;
   }
+}
+
+/* Controles explícitos da busca e grade que também vale após trocar de tela */
+#globalSearchToggle.search-toggle {
+  position: absolute !important;
+  z-index: 4 !important;
+  inset: 0 auto 0 0 !important;
+  display: inline-flex !important;
+  width: 40px !important;
+  height: 40px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  color: var(--color-text-muted, #aab7c7) !important;
+  cursor: pointer !important;
+}
+
+#globalSearchToggle.search-toggle:hover,
+#globalSearchToggle.search-toggle:focus-visible {
+  color: var(--prisma-cyan, #67e8f9) !important;
+  outline: 2px solid currentColor;
+  outline-offset: -3px;
+}
+
+#globalSearchToggle.search-toggle svg,
+#globalSearchToggle.search-toggle i {
+  width: 20px !important;
+  height: 20px !important;
+  pointer-events: none;
+}
+
+#dashboard .stat-cards.dash-kpi-row {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  grid-auto-rows: auto !important;
+  justify-content: start !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+  width: min(100%, 544px) !important;
+  max-width: 544px !important;
+}
+
+#dashboard .dash-kpi-row > .stat-card {
+  width: 100% !important;
+  max-width: 266px !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  aspect-ratio: 1 / 1 !important;
+  overflow: hidden;
+}
+
+#dashboard .stat-card .stat-label,
+#dashboard .stat-card .stat-detail,
+#dashboard .stat-card .stat-value {
+  overflow-wrap: break-word !important;
+  word-break: normal !important;
+}
+
+#notificationsBackdrop[hidden],
+#notificationsPanel[hidden] {
+  display: none !important;
+}
+
+#notificationsPanel .notifications-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#notificationsPanel .notifications-close {
+  display: inline-flex;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+#notificationsPanel .notifications-close:hover,
+#notificationsPanel .notifications-close:focus-visible {
+  background: rgba(148, 163, 184, 0.1);
+  color: #fff;
+}
+
+#notificationsPanel .notifications-close svg {
+  width: 18px;
+  height: 18px;
 }

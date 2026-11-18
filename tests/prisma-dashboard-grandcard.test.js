@@ -8,6 +8,7 @@ const dashboardHtml = fs.readFileSync(path.join(__dirname, '../telas/dashboard.h
 const scriptJs = fs.readFileSync(path.join(__dirname, '../js/script.js'), 'utf-8');
 const modernCss = fs.readFileSync(path.join(__dirname, '../css/prisma-modern.css'), 'utf-8');
 const dashboardPremiumCss = fs.readFileSync(path.join(__dirname, '../css/prisma-dashboard-premium.css'), 'utf-8');
+const mobileCss = fs.readFileSync(path.join(__dirname, '../css/prisma-mobile.css'), 'utf-8');
 
 test('1. Grand Card Structure in index.html & telas/dashboard.html', () => {
     [
@@ -135,4 +136,24 @@ test('5. Dashboard module dialogs stay anchored to the viewport', () => {
         dashboardPremiumCss,
         /body\.modal-module-open\s+#dashboard\.section\.active\s*\{[^}]*animation:\s*none\s*!important;[^}]*transform:\s*none\s*!important;/
     );
+});
+
+test('6. Global search has an explicit keyboard-accessible toggle', () => {
+    assert.match(indexHtml, /id="globalSearchToggle"[^>]*aria-controls="globalSearchResults"/);
+    assert.match(scriptJs, /searchToggle\.addEventListener\('click'/);
+    assert.match(scriptJs, /requestAnimationFrame\(\(\) => searchInput\?\.focus\(\)\)/);
+});
+
+test('7. Dashboard KPI cards remain in a two-column square grid after screen changes', () => {
+    assert.match(mobileCss, /#dashboard \.stat-cards\.dash-kpi-row\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\s*!important/);
+    assert.match(mobileCss, /#dashboard \.dash-kpi-row > \.stat-card\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1\s*!important/);
+    assert.match(mobileCss, /#dashboard \.stat-card \.stat-label,[^}]*word-break:\s*normal\s*!important/);
+    assert.doesNotMatch(mobileCss, /#dashboard \.stat-card \.stat-label,[^}]*overflow-wrap:\s*anywhere/);
+    assert.doesNotMatch(scriptJs, /applySquareDashboardGrid/);
+});
+
+test('8. Notification panel has an explicit close control', () => {
+    assert.match(indexHtml, /class="notifications-close"[^>]*aria-label="Fechar central de notificações"/);
+    assert.match(scriptJs, /closeButton\.addEventListener\('click'/);
+    assert.match(scriptJs, /if \(panel && panel\.parentElement !== document\.body\) document\.body\.appendChild\(panel\)/);
 });
