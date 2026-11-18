@@ -6067,6 +6067,204 @@ a.btn:focus-visible,
   }
 }
 
+/* Dashboard: cards uniformes e conteúdo organizado */
+#dashboard .dash-kpi-row {
+  align-items: stretch !important;
+}
+
+#dashboard .dash-kpi-row .stat-card {
+  min-height: 168px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+
+#dashboard .stat-card .stat-header {
+  min-height: 44px;
+  margin-bottom: 12px;
+}
+
+#dashboard .stat-card .stat-value {
+  max-width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  font-size: clamp(1.2rem, 2vw, 1.65rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
+#dashboard .stat-card .stat-detail {
+  min-height: 18px;
+  margin-top: 6px;
+  line-height: 1.35;
+}
+
+#dashboard .grand-modules-grid {
+  align-items: stretch;
+}
+
+#dashboard .grand-module-item {
+  min-height: 190px;
+  box-sizing: border-box;
+}
+
+#dashboard .module-item-body {
+  flex: 1;
+}
+
+@media (max-width: 860px) {
+  #dashboard .grand-modules-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #dashboard .grand-module-item {
+    min-height: 170px;
+  }
+}
+
+@media (max-width: 580px) {
+  #dashboard .dash-kpi-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  #dashboard .dash-kpi-row .stat-card {
+    min-height: 150px;
+  }
+
+  #dashboard .grand-card-header,
+  #dashboard .grand-card-brand,
+  #dashboard .grand-card-quick-kpis {
+    width: 100%;
+  }
+
+  #dashboard .grand-card-quick-kpis {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  #dashboard .grand-kpi-pill {
+    justify-content: space-between;
+  }
+}
+
+/* Menu do perfil: dimensões estáveis, alinhado à barra superior */
+#profileDropdown.profile-dropdown {
+  position: fixed !important;
+  top: 64px !important;
+  right: 20px !important;
+  left: auto !important;
+  width: min(320px, calc(100vw - 24px)) !important;
+  max-height: calc(100dvh - 84px) !important;
+  overflow-y: auto;
+  border-radius: 16px !important;
+  z-index: 1400 !important;
+  box-sizing: border-box;
+}
+
+#profileDropdown.profile-dropdown .profile-dropdown-header {
+  min-width: 0;
+  align-items: center;
+}
+
+#profileDropdown.profile-dropdown .profile-dropdown-info {
+  min-width: 0;
+  flex: 1;
+}
+
+#profileDropdown.profile-dropdown .profile-dropdown-info h4,
+#profileDropdown.profile-dropdown .profile-dropdown-info p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#profileDropdown.profile-dropdown .profile-dropdown-stats {
+  min-width: 0;
+}
+
+#profileDropdown.profile-dropdown .dropdown-stat {
+  min-width: 0;
+}
+
+#profileDropdown.profile-dropdown .dropdown-stat-value {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  #profileDropdown.profile-dropdown {
+    top: 58px !important;
+    right: 12px !important;
+  }
+
+  #profileDropdown.profile-dropdown .profile-dropdown-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Busca: não altera o tamanho da barra nem empurra os elementos da navbar */
+.navbar-left #globalSearchBox {
+  position: relative;
+  z-index: 1350;
+  isolation: isolate;
+}
+
+.navbar-left #globalSearchBox:focus-within,
+.navbar-left #globalSearchBox:has(#globalSearchInput.active) {
+  position: relative;
+  width: clamp(180px, 22vw, 280px) !important;
+  max-width: min(280px, calc(100vw - 220px)) !important;
+}
+
+.navbar-left #globalSearchResults {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  right: auto;
+  width: min(440px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  z-index: 1500;
+}
+
+@media (max-width: 900px) {
+  .navbar:has(#globalSearchBox:focus-within),
+  .navbar:has(#globalSearchBox.active) {
+    min-height: 116px !important;
+    padding-bottom: 64px !important;
+  }
+
+  .navbar-left #globalSearchBox:focus-within,
+  .navbar-left #globalSearchBox:has(#globalSearchInput.active),
+  .navbar-left #globalSearchBox.active {
+    position: absolute !important;
+    left: 12px !important;
+    right: 12px !important;
+    bottom: 8px !important;
+    top: auto !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+
+  .navbar-left #globalSearchBox:focus-within input,
+  .navbar-left #globalSearchBox input.active,
+  .navbar-left #globalSearchBox.active input {
+    width: 100% !important;
+  }
+
+  .navbar-left #globalSearchResults {
+    position: fixed;
+    top: calc(max(116px, env(safe-area-inset-top, 0px) + 116px));
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+  }
+}
+
 /* Centro Financeiro — grade compacta sem alterar os estilos das demais telas */
 #centro-financeiro .centro-financeiro {
   padding: clamp(14px, 1.3vw, 18px);
