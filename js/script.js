@@ -16462,6 +16462,14 @@ document.addEventListener('DOMContentLoaded', () => {
     window.closeAllTopOverlays = closeAllTopOverlays;
 
     if (searchInput) {
+      if (searchBox) {
+        searchBox.addEventListener('click', (e) => {
+          if (e.target.closest('#globalSearchClear')) return;
+          e.stopPropagation();
+          if (activeMenu !== 'search') open('search');
+          requestAnimationFrame(() => searchInput.focus());
+        });
+      }
       searchInput.addEventListener('focus', () => {
         if (activeMenu !== 'search') open('search');
       });
@@ -16546,6 +16554,41 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     }
+  })();
+
+  (function applySquareDashboardGrid() {
+    function updateLayout() {
+      const grid = document.querySelector('#dashboard .dash-kpi-row');
+      if (!grid) return;
+      if (window.innerWidth <= 540) {
+        const available = Math.max(0, grid.clientWidth || window.innerWidth - 52);
+        const cardWidth = Math.max(120, Math.floor((available - 10) / 2));
+        grid.style.gridTemplateColumns = `${cardWidth}px ${cardWidth}px`;
+        grid.style.justifyContent = 'stretch';
+        grid.querySelectorAll(':scope > .stat-card').forEach((card) => {
+          card.style.width = `${cardWidth}px`;
+          card.style.maxWidth = `${cardWidth}px`;
+          card.style.height = `${cardWidth}px`;
+          card.style.minHeight = '0';
+        });
+      } else {
+        grid.style.gridTemplateColumns = '266px 266px';
+        grid.style.justifyContent = 'start';
+        grid.querySelectorAll(':scope > .stat-card').forEach((card) => {
+          card.style.width = '266px';
+          card.style.maxWidth = '266px';
+          card.style.height = '266px';
+          card.style.minHeight = '0';
+        });
+      }
+      grid.querySelectorAll(':scope > .stat-card').forEach((card) => {
+        card.style.aspectRatio = '1 / 1';
+        card.style.minHeight = '0';
+        card.style.height = 'auto';
+      });
+    }
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
   })();
 
   /* =========================================================
