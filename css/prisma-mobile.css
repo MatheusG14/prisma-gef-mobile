@@ -874,6 +874,15 @@ table {
     --mobile-card-radius: 14px;
   }
 
+  .section-heading-actions .btn {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    gap: 4px;
+  }
+
   #mainApp .section .card,
   #mainApp .section .stat-card,
   #mainApp .section .grand-module-item,
@@ -907,8 +916,259 @@ table {
     --mobile-card-radius: 12px;
   }
 
+  #dashboard .monitoring-quick-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #dashboard .monitoring-quick-filters .quick-filter-chip {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  #dashboard .dash-insight-discreet-pill {
+    height: auto;
+    align-items: flex-start !important;
+  }
+
+  #dashboard #dashInsightText {
+    display: block;
+    flex: 1 1 auto;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+    overflow-wrap: anywhere;
+  }
+
+  #dashboard .monitoring-header {
+    align-items: flex-start !important;
+  }
+
+  #dashboard .monitoring-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #dashboard .monitoring-title-row h3 {
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  #dashboard .monitoring-kicker {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 0.58rem !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  #dashboard .monitoring-head-left {
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  #dashboard .monitoring-head-text {
+    width: 0;
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 0;
+  }
+
+  #dashboard .monitoring-subtitle {
+    white-space: normal !important;
+    overflow: visible !important;
+    overflow-wrap: anywhere;
+    text-overflow: clip !important;
+  }
+
+  #dashboard #dashScoreRingWrap,
+  #dashboard .score-ring-label,
+  #dashboard .score-ring-label .score-class {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #dashboard #dashScoreRingWrap {
+    width: 100%;
+  }
+
+  #dashboard .score-ring-label .score-class {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
   #configuracoes .settings-grid {
     grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #contas .section-heading-actions,
+  #carteira-ativos .section-heading-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  #contas .section-heading-actions .btn,
+  #carteira-ativos .section-heading-actions .btn {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  #prisma-ai .ai-period-selector {
+    box-sizing: border-box;
+    min-width: 0;
+  }
+
+  #prisma-ai .ai-period-btn {
+    box-sizing: border-box;
+    min-width: 0;
+    padding-inline: 3px;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  #prisma-ai .ai-header-controls .ai-analyze-btn {
+    box-sizing: border-box;
+    grid-column: 1 / -1;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    padding-inline: 6px;
+  }
+
+  #prisma-ai .ai-header-controls .ai-analyze-btn svg,
+  #prisma-ai .ai-header-controls .ai-analyze-btn i {
+    flex: 0 0 auto;
+  }
+
+  #investimentos .asset-catalog-toolbar,
+  #assetCatalogModal .asset-catalog-toolbar {
+    min-width: 0;
+  }
+
+  #investimentos .asset-search-wrap,
+  #assetCatalogModal .asset-search-wrap {
+    min-width: 0;
+    width: 100%;
+  }
+
+  #investimentos .asset-catalog-toolbar .carteira-sort,
+  #assetCatalogModal .asset-catalog-toolbar .carteira-sort {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  #investimentos .asset-catalog-grid,
+  #assetCatalogModal .asset-catalog-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #carteira-ativos .carteira-distribution-card,
+  #carteira-ativos .carteira-dist-head > div,
+  #carteira-ativos .carteira-distribution-body,
+  #carteira-ativos .portfolio-legend {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #carteira-ativos .div-mode-toggle,
+  #carteira-ativos .carteira-distribution-body .portfolio-legend {
+    grid-template-columns: minmax(0, 1fr) !important;
+    flex-wrap: wrap;
+  }
+
+  #educacao-financeira .edu-quiz-list {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #educacao-financeira .edu-quiz-item {
+    min-width: 0;
+  }
+
+  #centro-financeiro .cf-filter-bar #cfClearFilters {
+    box-sizing: border-box;
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal !important;
+  }
+
+  #centro-financeiro .cf-quick-links > a {
+    box-sizing: border-box;
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    justify-content: flex-start;
+  }
+
+  #educacao-financeira .trilha-modal-tabs {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #educacao-financeira .trilha-modal-tabs .filter-chip {
+    min-width: 0;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  #educacao-financeira .edu-toggle-reality {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    justify-content: center;
+  }
+
+  #educacao-financeira .edu-pdf-card {
+    align-items: stretch;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  #educacao-financeira .edu-pdf-info {
+    min-width: 0;
+  }
+
+  #educacao-financeira .edu-pdf-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    width: 100%;
+  }
+
+  #educacao-financeira .edu-pdf-actions .btn {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    justify-content: center;
+  }
+
+  #educacao-financeira .edu-pdf-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   #mainApp .section .stat-card {
@@ -929,10 +1189,88 @@ table {
   }
 }
 
+@media (min-width: 769px) and (max-width: 1100px) {
+  .section-heading-actions .btn {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    gap: 4px !important;
+  }
+
+  #investimentos .investment-hero {
+    flex-wrap: wrap;
+  }
+
+  #investimentos .investment-hero-copy {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  #investimentos .investment-hero > .btn {
+    flex: 0 0 auto;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    gap: 4px !important;
+  }
+
+  #educacao-financeira .education-course-actions {
+    min-width: 0;
+  }
+
+  #educacao-financeira .education-course-actions .btn {
+    box-sizing: border-box;
+    flex: 1 1 120px;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    gap: 4px !important;
+  }
+
+  #educacao-financeira .edu-pdf-card {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  #educacao-financeira .edu-pdf-info {
+    min-width: 0;
+  }
+
+  #educacao-financeira .edu-pdf-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  #educacao-financeira .edu-pdf-actions .btn {
+    box-sizing: border-box;
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
 @media (max-width: 380px) {
   :root {
     --mobile-card-padding: 10px;
     --mobile-card-radius: 10px;
+  }
+
+  #transferenciaModal .modal-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  #transferenciaModal .modal-actions > .btn {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
   }
 
   #mainApp .section .stat-card {
