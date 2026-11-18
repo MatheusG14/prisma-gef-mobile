@@ -418,7 +418,7 @@
               const totalN = (window.TRILHA_MODULOS || []).filter(m => m.nivel === n).length;
               return `
               <div class="trilha-level-prog-item">
-                <span>${NIVEL_EMOJI[n]} ${NIVEL_LABELS[n]}</span>
+                <span><i data-lucide="${NIVEL_ICON[n]}"></i> ${NIVEL_LABELS[n]}</span>
                 <div class="trilha-progress-track trilha-progress-track--sm">
                   <div id="trilhaBar_${n}" class="trilha-progress-fill"></div>
                 </div>

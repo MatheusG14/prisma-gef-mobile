@@ -1,6 +1,12 @@
 const { test, expect } = require('@playwright/test');
 
 test('monthly report shows calendar months from January through December', async ({ page }) => {
+  const chartErrors = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('Erro ao inicializar gráfico')) {
+      chartErrors.push(message.text());
+    }
+  });
   await page.route('**/chart.umd.min.js*', (route) =>
     route.fulfill({
       contentType: 'application/javascript',
@@ -26,10 +32,17 @@ test('monthly report shows calendar months from January through December', async
   ).toBeTruthy();
 
   const year = await page.evaluate(() => new Date().getFullYear());
-  const labels = await page.evaluate(() =>
-    window.__chartInstances.find((chart) => chart.canvas.id === 'reportChart').data.labels
-  );
+  const reportData = await page.evaluate(() => {
+    const report = window.__chartInstances.find((chart) => chart.canvas.id === 'reportChart');
+    return {
+      labels: report.data.labels,
+      datasets: report.data.datasets.map((dataset) => dataset.data)
+    };
+  });
   const monthAbbreviations = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-  expect(labels).toEqual(monthAbbreviations.map((month) => `${month}/${String(year).slice(-2)}`));
+  expect(reportData.labels).toEqual(monthAbbreviations.map((month) => `${month}/${String(year).slice(-2)}`));
+  expect(reportData.datasets).toHaveLength(2);
+  expect(reportData.datasets.every((dataset) => dataset.length === 12)).toBeTruthy();
+  expect(chartErrors).toEqual([]);
 });

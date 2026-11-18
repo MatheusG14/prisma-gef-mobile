@@ -66,7 +66,10 @@ test('financial empty states and budget actions fit all viewport sizes', async (
       expect(layout.whiteSpace).toBe('normal');
       expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
       expect(layout.left).toBeGreaterThanOrEqual(layout.tableLeft - 1);
-      expect(layout.right).toBeLessThanOrEqual(layout.tableRight + 1);
+      expect(
+        layout.right,
+        `empty-state text exceeds table at ${width}px: ${JSON.stringify(layout)}`
+      ).toBeLessThanOrEqual(layout.tableRight + 1);
       expect(layout.textRects.every((line) =>
         line.left >= layout.left - 1 && line.right <= layout.right + 1
       )).toBeTruthy();

@@ -30,7 +30,7 @@
         <button class="btn secondary btn-sm" id="aiResetBtn" title="Reiniciar análise e limpar conversa">
           <i data-lucide="refresh-ccw"></i> Reiniciar
         </button>
-        <button class="btn secondary btn-sm" id="aiToggleCockpitBtn" title="Visualizar Cockpit de Saúde e Gráficos">
+        <button class="btn secondary btn-sm" id="aiToggleCockpitBtn" title="Visualizar Cockpit de Saúde e Gráficos" aria-expanded="false" aria-controls="aiCockpitDrawer">
           <i data-lucide="bar-chart-2"></i> Cockpit
         </button>
         <button class="btn primary btn-sm ai-analyze-btn" id="aiAnalyze" title="Executar análise completa das finanças" style="display:none;">
@@ -40,7 +40,7 @@
     </div>
 
     <!-- PAINEL RETRÁTIL DO COCKPIT & GRÁFICOS (SOB DEMANDA) -->
-    <div class="ai-cockpit-drawer" id="aiCockpitDrawer" style="display: none;">
+    <div class="ai-cockpit-drawer" id="aiCockpitDrawer" aria-hidden="true" style="display: none;">
       <!-- Score banner -->
       <div class="ai-score-banner" id="aiScoreBanner">
         <div class="ai-score-left">

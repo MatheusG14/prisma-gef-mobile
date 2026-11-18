@@ -978,3 +978,364 @@ table {
   width: 18px;
   height: 18px;
 }
+
+@media (max-width: 380px) {
+  #dashboard .dashboard-empty {
+    padding: 8px !important;
+  }
+
+  #dashboard .grand-card-financial {
+    padding: 10px !important;
+  }
+
+  #dashboard .grand-module-item {
+    padding: 10px !important;
+  }
+
+  #dashboard .dash-kpi-row > .stat-card {
+    padding: 8px !important;
+  }
+
+  #dashboard .stat-card .stat-value {
+    font-size: clamp(0.55rem, 3.2vw, 0.8rem) !important;
+  }
+
+  #mainApp .section .card:not(.stat-card),
+  #mainApp .section .grand-module-item,
+  #mainApp .section .dashboard-empty,
+  #mainApp .section .edu-dash-card,
+  #mainApp .section .edu-portal-card,
+  #mainApp .section .edu-pdf-card,
+  #mainApp .section .invest-card,
+  #mainApp .section .overview-metric-card,
+  #mainApp .section .ai-kpi-card,
+  #mainApp .section .ai-chart-card,
+  #mainApp .section .ai-mini-card {
+    padding: 10px !important;
+  }
+}
+
+.financial-module-modal {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.financial-modal-dialog {
+  min-height: 0;
+}
+
+.financial-modal-body {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.monitoring-section-tabs .m-tab-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+  white-space: normal !important;
+  line-height: 1.25;
+}
+
+.monitoring-section-tabs .m-tab-btn > span:not(.tab-counter) {
+  min-width: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.monitoring-section-tabs .tab-counter {
+  flex: 0 0 auto;
+}
+
+#modalModuleMonitoring .monitoring-header {
+  display: flex;
+  flex-wrap: wrap !important;
+  align-items: flex-start;
+  gap: 8px !important;
+  padding: 8px !important;
+}
+
+#modalModuleMonitoring .monitoring-head-left,
+#modalModuleMonitoring .monitoring-head-text,
+#modalModuleMonitoring .monitoring-title-row {
+  min-width: 0;
+}
+
+#modalModuleMonitoring .monitoring-head-left {
+  flex: 1 1 100% !important;
+  width: 100% !important;
+  gap: 8px !important;
+}
+
+#modalModuleMonitoring .monitoring-icon-wrap {
+  flex: 0 0 36px;
+}
+
+#modalModuleMonitoring .monitoring-head-text {
+  flex: 1 1 0 !important;
+  width: 0 !important;
+}
+
+#modalModuleMonitoring .monitoring-title-row {
+  flex-wrap: wrap !important;
+  gap: 4px 8px;
+}
+
+#modalModuleMonitoring .monitoring-title-row h3,
+#modalModuleMonitoring .monitoring-kicker {
+  max-width: 100%;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal;
+}
+
+#modalModuleMonitoring .monitoring-subtitle {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+#dashboard .stat-card .stat-value {
+  display: block !important;
+  min-width: 0;
+  font-size: clamp(0.65rem, 3.8vw, 0.9rem) !important;
+  line-height: 1.2;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+
+@media (max-width: 540px) {
+  #dashboard .stat-card .stat-value {
+    font-size: clamp(0.55rem, 3.2vw, 0.8rem) !important;
+  }
+
+  #mainApp .section .card:not(.stat-card),
+  #mainApp .section .grand-module-item,
+  #mainApp .section .dashboard-empty,
+  #mainApp .section .edu-dash-card,
+  #mainApp .section .edu-portal-card,
+  #mainApp .section .edu-pdf-card,
+  #mainApp .section .invest-card,
+  #mainApp .section .overview-metric-card,
+  #mainApp .section .ai-kpi-card,
+  #mainApp .section .ai-chart-card,
+  #mainApp .section .ai-mini-card {
+    padding: clamp(10px, 3vw, 12px) !important;
+  }
+}
+
+@media (min-width: 541px) and (max-width: 768px) {
+  #mainApp .section .dashboard-empty {
+    padding: 14px !important;
+  }
+
+  #mainApp .section .card:not(.stat-card),
+  #mainApp .section .grand-module-item,
+  #mainApp .section .edu-dash-card,
+  #mainApp .section .edu-portal-card,
+  #mainApp .section .edu-pdf-card,
+  #mainApp .section .invest-card,
+  #mainApp .section .overview-metric-card,
+  #mainApp .section .ai-kpi-card,
+  #mainApp .section .ai-chart-card,
+  #mainApp .section .ai-mini-card {
+    padding: 14px !important;
+  }
+}
+
+#dashboard .dash-score-card .stat-header {
+  gap: 4px;
+}
+
+#dashboard .dash-score-card .stat-badge {
+  max-width: calc(100% - 44px);
+  white-space: normal;
+  font-size: 0.65rem;
+  line-height: 1.2;
+}
+
+#dashboard .dash-score-card #dashScoreRingWrap {
+  width: 100%;
+  min-width: 0;
+  gap: 6px !important;
+}
+
+#dashboard .dash-score-card .score-ring-svg {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+}
+
+#dashboard .dash-score-card .score-ring-label,
+#dashboard .dash-score-card .score-ring-label .score-class {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+#dashboard .dash-score-card .score-ring-label .score-class {
+  font-size: 0.5rem !important;
+  line-height: 1.15;
+  overflow-wrap: normal !important;
+}
+
+@media (max-width: 420px) {
+  .monitoring-section-tabs {
+    gap: 4px !important;
+    padding-right: 8px !important;
+    padding-left: 8px !important;
+  }
+
+  .monitoring-section-tabs .m-tab-btn {
+    gap: 4px !important;
+    padding: 8px 5px !important;
+    font-size: 0.7rem !important;
+  }
+
+  #modalModuleMonitoring .monitoring-section-tabs .m-tab-btn {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  #modalModuleMonitoring .monitoring-section-tabs .m-tab-btn > span:not(.tab-counter) {
+    width: 100%;
+    text-align: center;
+  }
+
+  #modalModuleMonitoring .monitoring-quick-filters .quick-filter-chip {
+    padding-right: 2px !important;
+    padding-left: 2px !important;
+    font-size: 0.65rem;
+  }
+}
+
+@media (max-width: 1024px) {
+  .btn.btn-sm,
+  .btn-sm {
+    gap: 4px !important;
+    padding-right: 8px !important;
+    padding-left: 8px !important;
+  }
+}
+
+#investimentos #addInvestimentoBtn {
+  gap: 4px !important;
+  padding-right: 14px !important;
+  padding-left: 14px !important;
+}
+
+#carteira-ativos .card-head,
+#carteira-ativos .card-head > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+#carteira-ativos .card-head h3,
+#carteira-ativos .carteira-dist-head h3 {
+  min-width: 0;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  overflow-wrap: anywhere;
+}
+
+#carteira-ativos .card-head p,
+#carteira-ativos .carteira-dist-head p {
+  max-width: 100%;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+.asset-catalog-card,
+.asset-catalog-toolbar,
+.asset-catalog-grid,
+.asset-card {
+  min-width: 0;
+}
+
+.asset-search-wrap {
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .asset-catalog-toolbar > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .asset-search-wrap {
+    flex: 1 1 100%;
+  }
+
+  .asset-catalog-toolbar select {
+    width: 100%;
+  }
+
+  .asset-catalog-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .edu-quiz-list,
+  .edu-pdf-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    min-width: 0;
+  }
+
+  .edu-quiz-item,
+  .edu-pdf-card,
+  .edu-pdf-info {
+    min-width: 0;
+  }
+
+  .edu-pdf-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .edu-pdf-info {
+    flex: 1 1 0;
+    overflow-wrap: anywhere;
+  }
+
+  .edu-pdf-actions {
+    flex: 1 1 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  #centro-financeiro .cf-filter-bar #cfClearFilters {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  #cfModalOverview .cf-quick-links .btn-sm {
+    padding-right: 4px !important;
+    padding-left: 4px !important;
+    font-size: 0.72rem !important;
+    white-space: normal !important;
+  }
+
+  #modalEduSimulador .edu-toggle-reality {
+    white-space: normal !important;
+    flex-wrap: wrap;
+    justify-content: center;
+    text-align: center;
+  }
+
+  #transferenciaModal .modal-card,
+  #transferenciaModal .modal-form,
+  #transferenciaModal .modal-grid {
+    min-width: 0;
+  }
+
+  #transferenciaModal .modal-form {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  #transferenciaModal .modal-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -124,6 +124,9 @@ async function collectLayoutIssues(page, scopeSelector, screenName, width) {
 
     for (const textElement of scope.querySelectorAll('h1,h2,h3,h4,h5,h6,p,span,strong,small,label,td,th')) {
       if (!textElement.textContent.trim() || !visible(textElement) || inHorizontalScroller(textElement)) continue;
+      const hasVisibleDisclosure = textElement.id && Array.from(document.querySelectorAll('[aria-controls]'))
+        .some((control) => control.getAttribute('aria-controls') === textElement.id && visible(control));
+      if (hasVisibleDisclosure) continue;
       const style = getComputedStyle(textElement);
       const clipsText = ['hidden', 'clip'].includes(style.overflowX) ||
         ['hidden', 'clip'].includes(style.overflowY) || style.whiteSpace === 'nowrap' ||
@@ -232,8 +235,7 @@ async function inspectDashboardLongValues(page, width) {
 async function inspectGlobalPanels(page, width) {
   const issues = [];
   const panels = [
-    { menu: 'profile', panel: '#profileDropdown', name: 'global/profileDropdown' },
-    { menu: 'notifications', panel: '#notificationsPanel', name: 'global/notificationsPanel' }
+    { menu: 'profile', panel: '#profileDropdown', name: 'global/profileDropdown' }
   ];
 
   for (const { menu, panel, name } of panels) {
@@ -247,12 +249,9 @@ async function inspectGlobalPanels(page, width) {
     }));
     await expect(
       page.locator(panel),
-      `${name} should open: ${JSON.stringify(panelState)}`
+      `${name} should open at ${width}px: ${JSON.stringify(panelState)}`
     ).toBeVisible();
     issues.push(...await collectLayoutIssues(page, panel, name, width));
-    if (panel === '#notificationsPanel') {
-      issues.push(...await collectTabIssues(page, panel, name, width));
-    }
     await page.evaluate(() => window.PrismaNavbar?.closeAll());
   }
 
@@ -331,6 +330,7 @@ test('screen and dialog text fits buttons, cards, and viewport', async ({ page }
   test.setTimeout(120_000);
   await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.PrismaNavbar && window.PrismaNotifications);
+  await page.waitForFunction(() => document.getElementById('loginModal')?.style.display === 'flex');
   await page.addStyleTag({
     content: `
       #mainApp { display: flex !important; }

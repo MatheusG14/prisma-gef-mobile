@@ -30,6 +30,7 @@ test('dashboard module dialog buttons are fully visible and reachable', async ({
       await page.locator(`[data-open-module="${moduleName}"]`).evaluate((element) => element.click());
       const modal = page.locator(`#${modalId}`);
       await expect(modal).toBeVisible();
+      await expect(page.locator('body')).toHaveClass(/prisma-scroll-locked/);
 
       const buttons = modal.locator('.financial-modal-body button:visible');
       const clippedButtons = await buttons.evaluateAll((elements) =>
@@ -55,6 +56,7 @@ test('dashboard module dialog buttons are fully visible and reachable', async ({
       }
 
       await modal.locator('[data-close-module]').first().evaluate((element) => element.click());
+      await expect(page.locator('body')).not.toHaveClass(/prisma-scroll-locked/);
     }
   }
 });

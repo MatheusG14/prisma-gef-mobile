@@ -8823,9 +8823,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function initReportChart() {
-    // Sempre usa a sequência completa de 12 meses em ordem cronológica
     const flow = getLast12Months();
-    months = flow.short;
+    const year = new Date().getFullYear();
+    const reportMonths = Array.from({ length: 12 }, (_, month) => {
+      return {
+        key: `${year}-${String(month + 1).padStart(2, '0')}`,
+        label: `${monthNames[month].slice(0, 3)}/${String(year).slice(-2)}`
+      };
+    });
     // Alinha dados caso arrays estejam incompletos
     if (!Array.isArray(incomeData) || incomeData.length !== 12) {
       incomeData = Array(12).fill(0).map((_, i) => Number(incomeData?.[i]) || 0);
@@ -8833,6 +8838,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!Array.isArray(expenseData) || expenseData.length !== 12) {
       expenseData = Array(12).fill(0).map((_, i) => Number(expenseData?.[i]) || 0);
     }
+    const flowIndex = new Map(flow.keys.map((key, index) => [key, index]));
+    const reportIncome = reportMonths.map(({ key }) => {
+      const index = flowIndex.get(key);
+      return index === undefined ? 0 : Number(incomeData[index]) || 0;
+    });
+    const reportExpenses = reportMonths.map(({ key }) => {
+      const index = flowIndex.get(key);
+      return index === undefined ? 0 : Number(expenseData[index]) || 0;
+    });
     const oldCanvas = document.getElementById('reportChart');
     if (!oldCanvas) return;
 
@@ -8868,18 +8882,18 @@ document.addEventListener('DOMContentLoaded', () => {
     reportChart = new window.Chart(ctx, {
       type: 'bar',
       data: {
-        labels: months,
+        labels: reportMonths.map(({ label }) => label),
         datasets: [
           {
             label: 'Receitas',
-            data: incomeData,
+            data: reportIncome,
             backgroundColor: createGradient(ctx, 340, 'rgba(0,255,136,0.15)', 'rgba(0,255,136,0.7)'),
             borderRadius: 6,
             borderSkipped: false,
           },
           {
             label: 'Despesas',
-            data: expenseData,
+            data: reportExpenses,
             backgroundColor: createGradient(ctx, 340, 'rgba(255,84,112,0.15)', 'rgba(255,84,112,0.7)'),
             borderRadius: 6,
             borderSkipped: false,
@@ -12035,6 +12049,7 @@ document.addEventListener('DOMContentLoaded', () => {
       modalEl.classList.add('show', 'active');
       modalEl.setAttribute('aria-hidden', 'false');
       document.body.classList.add('modal-module-open');
+      queueModalScrollSync();
 
       // Garante redesenho e atualização de gráficos no Chart.js
       if (moduleId === 'cashflow') {
@@ -12097,6 +12112,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!anyModalOpen) {
         document.body.classList.remove('modal-module-open');
       }
+      queueModalScrollSync();
 
       if (restoreFocus && previousActiveElement && typeof previousActiveElement.focus === 'function') {
         previousActiveElement.focus();
@@ -14574,7 +14590,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (toggleCockpitBtn && cockpitDrawer) {
       toggleCockpitBtn.addEventListener('click', () => {
         const isOpen = cockpitDrawer.classList.toggle('open');
+        cockpitDrawer.style.display = isOpen ? '' : 'none';
+        cockpitDrawer.setAttribute('aria-hidden', String(!isOpen));
         toggleCockpitBtn.classList.toggle('active', isOpen);
+        toggleCockpitBtn.setAttribute('aria-expanded', String(isOpen));
         toggleCockpitBtn.innerHTML = isOpen
           ? '<i data-lucide="chevron-up"></i> Ocultar Métricas'
           : '<i data-lucide="sliders-horizontal"></i> Métricas & Gráficos';
@@ -16391,7 +16410,7 @@ document.addEventListener('DOMContentLoaded', () => {
           sidebarOverlay.classList.remove('active');
           sidebarOverlay.style.display = 'none';
         }
-        document.body.classList.remove('prisma-scroll-locked');
+        queueModalScrollSync();
         setExpanded(mobileMenu, false);
         if (typeof window.updateMobileMenuIcon === 'function') window.updateMobileMenuIcon();
       }
@@ -16437,7 +16456,7 @@ document.addEventListener('DOMContentLoaded', () => {
           sidebarOverlay.classList.add('active');
           sidebarOverlay.style.display = 'block';
         }
-        document.body.classList.add('prisma-scroll-locked');
+        queueModalScrollSync();
         setExpanded(mobileMenu, true);
         const closeBtn = document.getElementById('sidebarCloseBtn');
         if (closeBtn) {

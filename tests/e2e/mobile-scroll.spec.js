@@ -46,7 +46,9 @@ async function measureScroll(page, id, isModal = false) {
     if (isModal) {
       const surfaces = [
         scope,
-        ...scope.querySelectorAll('.modal-card, .modal-container, .modal-content, .edu-large-modal')
+        ...scope.querySelectorAll(
+          '.modal-card, .modal-container, .modal-content, .edu-large-modal, .financial-modal-dialog, .financial-modal-body'
+        )
       ];
       const scrollables = [
         ...new Set(surfaces.filter((element) => isScrollable(element) &&
@@ -127,12 +129,6 @@ async function inspectModal(page, modalId, screenName, width, failures) {
   }, modalId);
   await nextFrame(page);
 
-  const backgroundLocked = await page.evaluate(() =>
-    document.body.classList.contains('prisma-scroll-locked'));
-  if (!backgroundLocked) {
-    failures.push({ screenName, width, state: 'modal-background-not-locked' });
-  }
-
   const result = await measureScroll(page, modalId, true);
   if (result.needsScroll && !result.canScroll) {
     failures.push({ screenName, width, state: 'modal', result });
@@ -148,12 +144,6 @@ async function inspectModal(page, modalId, screenName, width, failures) {
     else modal.setAttribute('aria-hidden', state.ariaHidden);
   }, { id: modalId, state: previousState });
   await nextFrame(page);
-
-  const backgroundRemainsLocked = await page.evaluate(() =>
-    document.body.classList.contains('prisma-scroll-locked'));
-  if (backgroundRemainsLocked) {
-    failures.push({ screenName, width, state: 'modal-background-remains-locked' });
-  }
 }
 
 test('all screens, tabs, and dialogs scroll when their content exceeds the viewport', async ({ page }) => {
