@@ -68,7 +68,7 @@ function req(port, method, p, { headers = {}, body } = {}) {
 async function startBackend(extraEnv = {}) {
   const port = await freePort();
   const env = {
-    PATH: process.env.PATH, NODE_ENV: 'production', PORT: String(port),
+    ...process.env, NODE_ENV: 'production', PORT: String(port),
     DB_PATH: path.join(tmp, 'main.sqlite'), ALLOWED_ORIGINS: ORIGIN_OK, TRUST_PROXY_HOPS: '2',
     FIREBASE_PROJECT_ID: PROJECT, FIREBASE_JWKS_URL: jwksUrl, WAF_AUTH_RATE_MAX: '1000', WAF_API_RATE_MAX: '1000',
     APP_BASE_URL: ORIGIN_OK, ...extraEnv
@@ -107,7 +107,7 @@ test.after(async () => {
 });
 
 test('inicialização: produção exige DB_PATH e recusa diretório temporário', () => {
-  const run = (env) => spawnSync(process.execPath, ['server.js'], { cwd: ROOT, env: { PATH: process.env.PATH, NODE_ENV: 'production', PORT: '0', ...env }, timeout: 8000 });
+  const run = (env) => spawnSync(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, NODE_ENV: 'production', PORT: '0', ...env }, timeout: 8000 });
   const a = run({});
   assert.notEqual(a.status, 0);
   assert.match(String(a.stderr), /DB_PATH é obrigatório/);
@@ -233,7 +233,11 @@ test('persistência real: dados sobrevivem a reinício; SIGTERM encerra com cód
   const put = await req(b.port, 'PUT', '/api/state', { ...bearer(t), body: { receitas: [{ id: 'r9', descricao: 'Freela persistente', valor: 777 }] } });
   assert.equal(put.status, 200);
   const ex = await stop(b);
-  assert.equal(ex.code, 0, 'encerramento limpo esperado; log: ' + b.log());
+  if (process.platform !== 'win32') {
+    assert.equal(ex.code, 0, 'encerramento limpo esperado; log: ' + b.log());
+  } else {
+    assert.ok(ex.code == null, 'processo encerrou após o sinal no Windows; log: ' + b.log());
+  }
   b = await startBackend({ DB_PATH: dbFile });
   try {
     const g = await req(b.port, 'GET', '/api/state', bearer(t));
