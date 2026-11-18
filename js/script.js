@@ -2447,10 +2447,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function getLast12Months(){
-    const now=new Date(); const labels=[]; const keys=[];
+  function getLast12Months(now = new Date()){
+    const labels=[]; const keys=[];
     for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); keys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); labels.push(monthNames[d.getMonth()]); }
     return {labels,keys};
+  }
+  function getMonthlyReportSeries(now = new Date()) {
+    const year = now.getFullYear();
+    const monthIndexes = new Map(getLast12Months(now).keys.map((key, index) => [key, index]));
+    const yearKeys = monthNames.map((_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
+    const valuesForYear = (values) => yearKeys.map((key) => {
+      const index = monthIndexes.get(key);
+      return index === undefined ? 0 : values[index] || 0;
+    });
+
+    return {
+      labels: monthNames.map((month) => `${month.slice(0, 3)}/${String(year).slice(-2)}`),
+      income: valuesForYear(incomeData),
+      expenses: valuesForYear(expenseData)
+    };
   }
   function getTransactionMonthKey(value){
     if(!value) return null; const d=new Date(String(value).includes('T')?value:`${value}T00:00:00`); if(Number.isNaN(d.getTime())) return null;
@@ -8342,21 +8357,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     const ctx = canvas.getContext('2d');
+    const reportSeries = getMonthlyReportSeries();
     reportChart = new window.Chart(ctx, {
       type: 'bar',
       data: {
-        labels: months,
+        labels: reportSeries.labels,
         datasets: [
           {
             label: 'Receitas',
-            data: incomeData,
+            data: reportSeries.income,
             backgroundColor: createGradient(ctx, 340, 'rgba(0,255,136,0.15)', 'rgba(0,255,136,0.7)'),
             borderRadius: 6,
             borderSkipped: false,
           },
           {
             label: 'Despesas',
-            data: expenseData,
+            data: reportSeries.expenses,
             backgroundColor: createGradient(ctx, 340, 'rgba(255,84,112,0.15)', 'rgba(255,84,112,0.7)'),
             borderRadius: 6,
             borderSkipped: false,
