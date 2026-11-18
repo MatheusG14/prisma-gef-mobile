@@ -833,3 +833,37 @@ table {
     scroll-behavior: auto !important;
   }
 }
+
+@media (max-width: 600px) {
+  .financial-module-modal .monitoring-section-tabs {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch !important;
+    gap: var(--space-2) !important;
+    padding: var(--space-3) var(--space-3) 0 !important;
+  }
+
+  .financial-module-modal .monitoring-section-tabs .m-tab-btn {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: var(--touch-target-min);
+    height: auto;
+    white-space: normal !important;
+    text-align: left;
+    overflow-wrap: anywhere;
+    padding: var(--space-2) 10px !important;
+  }
+
+  .financial-module-modal .monitoring-section-tabs .m-tab-btn > span:not(.tab-counter) {
+    min-width: 0;
+    flex: 1 1 auto;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .financial-module-modal .monitoring-section-tabs .m-tab-btn .tab-counter {
+    flex: 0 0 auto;
+    align-self: center;
+  }
+}
