@@ -9,7 +9,7 @@ const sectionIds = [
 const cardSelector = [
   '.card', '.stat-card', '.grand-module-item', '.dashboard-empty', '.edu-dash-card',
   '.edu-portal-card', '.edu-pdf-card', '.invest-card', '.overview-metric-card',
-  '.ai-kpi-card', '.ai-chart-card', '.ai-mini-card', '.modal-card'
+  '.ai-kpi-card', '.ai-chart-card', '.ai-mini-card', '.modal-card', '.education-lesson-card'
 ].join(',');
 
 async function collectLayoutIssues(page, scopeSelector, screenName, width) {
@@ -44,6 +44,17 @@ async function collectLayoutIssues(page, scopeSelector, screenName, width) {
 
     for (const button of scope.querySelectorAll('button, [role="button"], a.btn')) {
       if (!visible(button)) continue;
+      const bounds = button.getBoundingClientRect();
+      if (!inHorizontalScroller(button) && (bounds.left < -1 || bounds.right > width + 1)) {
+        issues.push({
+          type: 'element-outside-viewport',
+          element: button.innerText || button.getAttribute('aria-label') || button.className,
+          bounds: [bounds.left, bounds.right],
+          screenName,
+          width
+        });
+      }
+
       const label = (button.innerText || button.getAttribute('aria-label') || '').trim();
       if (button.scrollWidth > button.clientWidth + 2) {
         const buttonStyle = getComputedStyle(button);
@@ -73,6 +84,17 @@ async function collectLayoutIssues(page, scopeSelector, screenName, width) {
 
     for (const card of scope.querySelectorAll(cardSelector)) {
       if (!visible(card)) continue;
+      const bounds = card.getBoundingClientRect();
+      if (!inHorizontalScroller(card) && (bounds.left < -1 || bounds.right > width + 1)) {
+        issues.push({
+          type: 'element-outside-viewport',
+          element: card.className,
+          bounds: [bounds.left, bounds.right],
+          screenName,
+          width
+        });
+      }
+
       const style = getComputedStyle(card);
       const hasScrollableContent = card.querySelector('[style*="overflow"], .table-responsive, .cf-table-wrap');
       if (!hasScrollableContent && ['hidden', 'clip'].includes(style.overflowX) &&
@@ -139,6 +161,76 @@ async function collectTabIssues(page, scopeSelector, screenName, width) {
   return issues;
 }
 
+async function inspectGlobalPanels(page, width) {
+  const issues = [];
+  const panels = [
+    { menu: 'profile', panel: '#profileDropdown', name: 'global/profileDropdown' },
+    { menu: 'notifications', panel: '#notificationsPanel', name: 'global/notificationsPanel' }
+  ];
+
+  for (const { menu, panel, name } of panels) {
+    await page.evaluate(() => window.PrismaNavbar?.closeAll());
+    await page.evaluate((menuName) => window.PrismaNavbar.open(menuName), menu);
+    const panelState = await page.locator(panel).evaluate((element) => ({
+      activeMenu: window.PrismaNavbar?.activeMenu,
+      hidden: element.hidden,
+      className: element.className,
+      ariaHidden: element.getAttribute('aria-hidden')
+    }));
+    await expect(
+      page.locator(panel),
+      `${name} should open: ${JSON.stringify(panelState)}`
+    ).toBeVisible();
+    issues.push(...await collectLayoutIssues(page, panel, name, width));
+    if (panel === '#notificationsPanel') {
+      issues.push(...await collectTabIssues(page, panel, name, width));
+    }
+    await page.evaluate(() => window.PrismaNavbar?.closeAll());
+  }
+
+  return issues;
+}
+
+async function inspectAiDrawer(page, width) {
+  const trigger = page.locator('#aiToggleCockpitBtn');
+  await expect(trigger, 'AI cockpit should expose its open control').toBeVisible();
+  await trigger.click();
+  const drawer = page.locator('#aiCockpitDrawer');
+  await expect(drawer, 'AI cockpit should open from its trigger').toBeVisible();
+  const issues = await collectLayoutIssues(page, '#aiCockpitDrawer', 'prisma-ai/aiCockpitDrawer', width);
+  await trigger.evaluate((element) => element.click());
+  await expect(drawer).toBeHidden();
+  return issues;
+}
+
+async function inspectEducationLesson(page, width) {
+  const trilhasTrigger = page.locator('#btnOpenTrilhas');
+  await expect(trilhasTrigger, 'education screen should expose the lesson library').toBeVisible();
+  await trilhasTrigger.evaluate((element) => element.click());
+  const trilhasModal = page.locator('#modalEduTrilhas');
+  await expect(trilhasModal, 'lesson library should open from its card').toBeVisible();
+
+  const lessonsTab = page.locator('#tabAulasInterativas');
+  await lessonsTab.evaluate((element) => element.click());
+  const lessonButton = page.locator('#educacao-financeira [data-open-lesson]').first();
+  await expect(lessonButton, 'education screen should render a lesson action').toBeVisible();
+  await lessonButton.evaluate((element) => element.click());
+
+  const modal = page.locator('#educationLessonModal');
+  await expect(modal, 'lesson action should open its dialog').toBeVisible();
+  const issues = await collectLayoutIssues(
+    page,
+    '#educationLessonModal',
+    'educacao-financeira/educationLessonModal',
+    width
+  );
+  await modal.locator('.education-lesson-close').evaluate((element) => element.click());
+  await expect(modal).toBeHidden();
+  await page.locator('#closeEduTrilhas').evaluate((element) => element.click());
+  await expect(trilhasModal).toBeHidden();
+  return issues;
+}
+
 async function inspectModal(page, modalId, screenName, width) {
   const previousState = await page.evaluate((id) => {
     const modal = document.getElementById(id);
@@ -167,8 +259,10 @@ async function inspectModal(page, modalId, screenName, width) {
   return issues;
 }
 
-test('screen and dialog text fits buttons, cards, and viewport', async ({ page }) => {
+test('screen and dialog text fits buttons, cards, and viewport', async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
   await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.PrismaNavbar && window.PrismaNotifications);
   await page.addStyleTag({
     content: `
       #mainApp { display: flex !important; }
@@ -186,9 +280,12 @@ test('screen and dialog text fits buttons, cards, and viewport', async ({ page }
   const allIssues = [];
   const widths = process.env.LAYOUT_AUDIT_WIDTHS
     ? process.env.LAYOUT_AUDIT_WIDTHS.split(',').map(Number)
-    : [320, 360, 390, 600, 768, 1024, 1280];
+    : testInfo.project.name === 'iOS-WebKit'
+      ? [320, 390]
+      : [320, 360, 390, 600, 768, 1024, 1280];
   for (const width of widths) {
     await page.setViewportSize({ width, height: 900 });
+    allIssues.push(...await inspectGlobalPanels(page, width));
     const sectionIdsPresent = await page.evaluate((ids) =>
       ids.filter((id) => document.getElementById(id)), sectionIds);
 
@@ -202,6 +299,12 @@ test('screen and dialog text fits buttons, cards, and viewport', async ({ page }
       }, sectionId);
       allIssues.push(...await collectLayoutIssues(page, `#${sectionId}`, sectionId, width));
       allIssues.push(...await collectTabIssues(page, `#${sectionId}`, sectionId, width));
+      if (sectionId === 'prisma-ai') {
+        allIssues.push(...await inspectAiDrawer(page, width));
+      }
+      if (sectionId === 'educacao-financeira') {
+        allIssues.push(...await inspectEducationLesson(page, width));
+      }
 
       const modalIds = await page.locator(`#${sectionId} .modal-overlay, #${sectionId} .financial-module-modal`)
         .evaluateAll((modals) => modals.map((modal) => modal.id).filter(Boolean));

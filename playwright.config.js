@@ -51,7 +51,7 @@ module.exports = {
     },
     {
       name: 'iOS-WebKit',
-      testMatch: '**/ios-scroll.spec.js',
+      testMatch: ['**/ios-scroll.spec.js', '**/text-overflow.spec.js'],
       use: {
         browserName: 'webkit',
         viewport: { width: 390, height: 844 },
