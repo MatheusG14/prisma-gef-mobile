@@ -275,6 +275,50 @@ select {
   box-shadow: var(--shadow-mobile-sheet);
 }
 
+@media (max-width: 640px) {
+  #profileDropdown {
+    width: min(320px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 80px);
+    right: 0 !important;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #profileDropdown .profile-dropdown-header {
+    min-width: 0;
+  }
+
+  #profileDropdown .profile-dropdown-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  #profileDropdown .profile-dropdown-info p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #profileDropdown .profile-dropdown-stats {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  #profileDropdown .dropdown-stat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    min-width: 0;
+    text-align: left;
+  }
+
+  #profileDropdown .dropdown-stat-value {
+    white-space: nowrap;
+  }
+}
+
 /* ------------------------------------------------------------------------------
    6. SIDEBAR / DRAWER MÓVEL
    ------------------------------------------------------------------------------ */
