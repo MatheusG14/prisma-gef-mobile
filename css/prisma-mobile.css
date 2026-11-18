@@ -867,3 +867,75 @@ table {
     align-self: center;
   }
 }
+
+@media (max-width: 768px) {
+  :root {
+    --mobile-card-padding: 14px;
+    --mobile-card-radius: 14px;
+  }
+
+  #mainApp .section .card,
+  #mainApp .section .stat-card,
+  #mainApp .section .grand-module-item,
+  #mainApp .section .dashboard-empty,
+  #mainApp .section .edu-dash-card,
+  #mainApp .section .edu-portal-card,
+  #mainApp .section .edu-pdf-card,
+  #mainApp .section .invest-card,
+  #mainApp .section .overview-metric-card,
+  #mainApp .section .ai-kpi-card,
+  #mainApp .section .ai-chart-card,
+  #mainApp .section .ai-mini-card,
+  .modal-card {
+    padding: var(--mobile-card-padding) !important;
+    border-radius: var(--mobile-card-radius) !important;
+  }
+
+  #mainApp .section .financial-modal-body .card {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #mainApp .section .stat-card {
+    min-height: 104px !important;
+  }
+}
+
+@media (max-width: 600px) {
+  :root {
+    --mobile-card-padding: 12px;
+    --mobile-card-radius: 12px;
+  }
+
+  #configuracoes .settings-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #mainApp .section .stat-card {
+    min-height: 96px !important;
+  }
+
+  #mainApp .section .stat-cards,
+  #mainApp .section .cards-grid,
+  #mainApp .section .edu-dash-grid,
+  #mainApp .section .account-grid,
+  #mainApp .section .goal-grid,
+  #mainApp .section .investments-grid,
+  #mainApp .section .investment-portal-grid,
+  #mainApp .section .profiles-grid,
+  #mainApp .section .settings-grid,
+  #mainApp .section .cf-overview-grid {
+    gap: 10px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  :root {
+    --mobile-card-padding: 10px;
+    --mobile-card-radius: 10px;
+  }
+
+  #mainApp .section .stat-card {
+    min-height: 88px !important;
+  }
+}
