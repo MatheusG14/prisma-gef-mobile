@@ -53,7 +53,8 @@ fileIncludes('index.html', 'viewport-fit=cover');
 fileIncludes('index.html', 'responsive.css');
 fileIncludes('index.html', 'manifest.webmanifest');
 fileIncludes('index.html', 'prisma-pwa.js');
-fileIncludes('index.html', 'id="mobileMenu"');
+fileIncludes('index.html', 'id="sidebarCloseBtn"');
+fileIncludes('index.html', 'id="sidebarOverlay"');
 fileIncludes('js/firebase-client.js', 'inMemoryPersistence');
 fileIncludes('js/firebase-client.js', 'persistentLocalCache');
 fileIncludes('sw.js', 'SHELL_CACHE');
@@ -67,13 +68,17 @@ const sections = [
   'relatorios', 'dados', 'configuracoes'
 ];
 const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const sidebarNav = indexHtml.match(/<nav\b[^>]*class="sidebar-nav"[^>]*>([\s\S]*?)<\/nav>/i);
+if (!sidebarNav) {
+  errors.push('index.html não contém a navegação lateral');
+}
+if (/<nav\b[^>]*(?:bottom-nav|bottomNav)/i.test(indexHtml)) {
+  errors.push('index.html ainda contém uma barra inferior de navegação');
+}
 for (const s of sections) {
-  if (!indexHtml.includes(`data-section="${s}"`)) {
+  if (!sidebarNav || !sidebarNav[1].includes(`data-section="${s}"`)) {
     errors.push(`sidebar sem data-section=${s}`);
   }
-}
-if (indexHtml.includes('class="bottom-nav"') || indexHtml.includes('id="bottomNav"')) {
-  errors.push('index.html ainda contém a navegação inferior');
 }
 
 console.log('=== Smoke estrutural Prisma GEF ===');

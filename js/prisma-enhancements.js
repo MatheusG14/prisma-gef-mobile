@@ -836,98 +836,27 @@
   }
 
   function setupAIChips() {
-    const chat = $('#aiChat');
-    const input = $('#aiInput');
-    const send = $('#aiSend');
-    if (!chat || chat.dataset.chipsReady) return;
-    chat.dataset.chipsReady = '1';
+    // UI enxuta: não injeta chips/botões extras no Prisma AI.
+    // As ações principais e atalhos já existem no HTML (#aiSmartActionsGrid / #aiQuickQuestions).
+    // Mantém apenas handlers de intents especiais nos chips nativos, sem duplicar controles.
+    const quick = document.getElementById('aiQuickQuestions');
+    if (!quick || quick.dataset.enhChipsBound === '1') return;
+    quick.dataset.enhChipsBound = '1';
 
-    const bar = document.createElement('div');
-    bar.className = 'ai-chips';
-    bar.innerHTML = `
-      <button type="button" class="ai-chip" data-q="Onde posso cortar gastos?">Onde posso cortar gastos?</button>
-      <button type="button" class="ai-chip" data-q="Estou no caminho da minha meta?">Estou no caminho da minha meta?</button>
-      <button type="button" class="ai-chip" data-q="Resumo do mês">Resumo do mês</button>
-      <button type="button" class="ai-chip" data-q="Gerar plano mensal">Gerar plano mensal</button>
-      <button type="button" class="ai-chip" data-q="Aplicar plano nos envelopes">Aplicar plano nos envelopes</button>
-    `;
-    const inputWrap = chat.parentElement?.querySelector('.ai-input');
-    if (inputWrap) inputWrap.parentElement.insertBefore(bar, inputWrap);
-    else chat.after(bar);
-
-    function botReply(text) {
-      const msg = document.createElement('div');
-      msg.className = 'ai-msg bot';
-      const avatar = document.createElement('span');
-      avatar.className = 'ai-avatar';
-      avatar.innerHTML = '<i data-lucide="bot"></i>';
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.textContent = text;
-      msg.append(avatar, bubble);
-      chat.appendChild(msg);
-      chat.scrollTop = chat.scrollHeight;
-      refreshIcons();
-    }
-
-    function answer(q) {
-      const user = document.createElement('div');
-      user.className = 'ai-msg user';
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.textContent = q;
-      user.appendChild(bubble);
-      chat.appendChild(user);
-
-      const insights = buildInsights();
-      let reply = '';
-      if (/cortar|economizar|gastos/i.test(q)) {
-        reply = insights.filter((i) => /gasto|maior|alta/i.test(i.title)).map((i) => `• ${i.title}: ${i.text} ${i.action || ''}`).join('\n')
-          || 'Ainda não há padrões claros. Cadastre mais despesas por categoria para eu indicar cortes.';
-      } else if (/meta/i.test(q)) {
-        reply = insights.filter((i) => /meta/i.test(i.title)).map((i) => `• ${i.text} ${i.action || ''}`).join('\n')
-          || 'Você ainda não tem metas cadastradas. Crie uma em Metas para eu acompanhar o progresso.';
-      } else if (/resumo/i.test(q)) {
-        reply = insights.map((i) => `• ${i.title}: ${i.text}`).join('\n');
-      } else if (/aplicar plano|aplicar.*50|aplicar.*envelope/i.test(q)) {
-        const ok = applyMonthlyPlanToEnvelopes({ navigate: true });
-        reply = ok
-          ? 'Pronto! Apliquei o plano 50-30-20 nos envelopes de orçamento. Você já pode ver os limites em Despesas → Orçamento.'
-          : 'Não consegui aplicar o plano. Cadastre receitas do mês e tente novamente.';
-      } else if (/plano/i.test(q)) {
-        reply = generateMonthlyPlan() + '\n\nDica: diga "Aplicar plano nos envelopes" ou use o botão em Despesas → Orçamento.';
-      } else {
-        reply = insights.slice(0, 3).map((i) => `• ${i.title}: ${i.text}`).join('\n');
-      }
-      setTimeout(() => botReply(reply), 350);
-    }
-
-    bar.querySelectorAll('.ai-chip').forEach((btn) => {
-      btn.addEventListener('click', () => answer(btn.dataset.q));
-    });
-
-    // Also enhance free-text for known intents
-    function handleFreeTextInput() {
-      const q = (input?.value || '').trim();
+    quick.addEventListener('click', (e) => {
+      const btn = e.target.closest('.ai-quick-btn, .ai-chip');
+      if (!btn) return;
+      const q = (btn.dataset.question || btn.dataset.q || '').trim();
       if (!q) return;
-      input.value = '';
-      answer(q);
-    }
-    
-    send?.addEventListener('click', handleFreeTextInput);
-    input?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') handleFreeTextInput();
-    });
-
-    // Plan button
-    const planBtn = document.createElement('button');
-    planBtn.className = 'btn secondary ai-plan-btn';
-    planBtn.innerHTML = '<i data-lucide="clipboard-list"></i> Gerar plano mensal';
-    planBtn.addEventListener('click', () => answer('Gerar plano mensal'));
-    const analyze = $('#aiAnalyze');
-    if (analyze) analyze.parentElement.insertBefore(planBtn, analyze.nextSibling);
-    refreshIcons();
+      // Intents de orçamento/envelope tratados aqui; demais seguem o motor principal do chat
+      if (/aplicar plano|aplicar.*50|aplicar.*envelope/i.test(q)) {
+        e.preventDefault();
+        e.stopPropagation();
+        applyMonthlyPlanToEnvelopes({ navigate: true });
+      }
+    }, true);
   }
+
 
   /* ========== 7. DASHBOARD EMPTY STATE ========== */
   function shouldShowDashboardEmpty() {

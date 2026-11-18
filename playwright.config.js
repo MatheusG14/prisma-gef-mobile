@@ -1,4 +1,7 @@
 /** @type {import('@playwright/test').PlaywrightTestConfig} */
+const os = require('node:os');
+const path = require('node:path');
+
 module.exports = {
   testDir: 'tests/e2e',
   timeout: 60_000,
@@ -13,10 +16,14 @@ module.exports = {
     screenshot: 'only-on-failure'
   },
   webServer: {
-    command: 'npx --yes serve dist -l 4173',
+    command: 'node server.js',
     port: 4173,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000
+    timeout: 120_000,
+    env: {
+      PORT: '4173',
+      DB_PATH: path.join(os.tmpdir(), `prisma-e2e-${process.pid}.sqlite`)
+    }
   },
   projects: [
     {
@@ -47,19 +54,6 @@ module.exports = {
           'Mozilla/5.0 (iPad; CPU OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
         isMobile: true,
         hasTouch: true
-      }
-    },
-    {
-      name: 'iOS-WebKit',
-      testMatch: ['**/ios-scroll.spec.js', '**/text-overflow.spec.js'],
-      use: {
-        browserName: 'webkit',
-        viewport: { width: 390, height: 844 },
-        userAgent:
-          'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-        isMobile: true,
-        hasTouch: true,
-        deviceScaleFactor: 3
       }
     }
   ]

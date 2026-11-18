@@ -25,11 +25,21 @@
     intermediario: 'Intermediário',
     avancado: 'Avançado'
   };
-  const NIVEL_EMOJI = {
-    iniciante: '🟢',
-    intermediario: '🟡',
-    avancado: '🔴'
+  const NIVEL_ICON = {
+    iniciante: 'sprout',
+    intermediario: 'trending-up',
+    avancado: 'award'
   };
+
+  function resolvePdfUrl(arquivo) {
+    if (!arquivo) return '';
+    if (/^https?:\/\//i.test(arquivo) || arquivo.startsWith('blob:')) return arquivo;
+    try {
+      return new URL(arquivo, window.location.href).href;
+    } catch (_) {
+      return arquivo;
+    }
+  }
 
   /* ── Utilitários de localStorage (com fallback) ───────────────── */
   function lsGet() {
@@ -107,7 +117,8 @@
     container.innerHTML = modulos.map(m => {
       const concluido = isConcluido(m.id);
       const labelNivel = NIVEL_LABELS[m.nivel] || m.nivel;
-      const emojiNivel = NIVEL_EMOJI[m.nivel] || '';
+      const iconNivel = NIVEL_ICON[m.nivel] || 'book-open';
+      const pdfHref = resolvePdfUrl(m.arquivo);
       return `
         <div class="trilha-card${concluido ? ' trilha-card--done' : ''}"
              id="trilha-card-${m.id}"
@@ -116,8 +127,8 @@
           <div class="trilha-card__num" style="color:${m.cor}">${String(m.numero).padStart(2, '0')}</div>
           <div class="trilha-card__body">
             <div class="trilha-card__badges">
-              <span class="trilha-badge trilha-badge--nivel">${emojiNivel} ${labelNivel}</span>
-              ${concluido ? '<span class="trilha-badge trilha-badge--done">✓ Concluído</span>' : ''}
+              <span class="trilha-badge trilha-badge--nivel"><i data-lucide="${iconNivel}" class="trilha-badge-icon"></i> ${labelNivel}</span>
+              ${concluido ? '<span class="trilha-badge trilha-badge--done"><i data-lucide="check" class="trilha-badge-icon"></i> Concluído</span>' : ''}
             </div>
             <h4 class="trilha-card__titulo">${m.titulo}</h4>
             <p class="trilha-card__sub">${m.subtitulo}</p>
@@ -127,7 +138,7 @@
                     data-id="${m.id}" aria-label="Ler ${m.titulo}">
               <i data-lucide="book-open"></i> Ler
             </button>
-            <a href="${m.arquivo}" download="${m.arquivo.split('/').pop()}"
+            <a href="${pdfHref}" download="${(m.arquivo || '').split('/').pop()}"
                class="btn secondary btn-sm"
                aria-label="Baixar PDF de ${m.titulo}">
               <i data-lucide="download"></i> Baixar PDF
@@ -137,7 +148,7 @@
                     data-id="${m.id}"
                     aria-label="${concluido ? 'Desmarcar conclusão de ' : 'Marcar como concluído: '}${m.titulo}"
                     aria-pressed="${concluido}">
-              ${concluido ? '✓ Concluído' : 'Marcar como concluído'}
+              ${concluido ? '<i data-lucide="check-circle-2"></i> Concluído' : '<i data-lucide="circle"></i> Marcar como concluído'}
             </button>
           </div>
         </div>`;
@@ -183,14 +194,22 @@
           <iframe id="trilhaPdfFrame"
                   title="Leitor de PDF"
                   aria-label="Visualizador do material em PDF"
-                  class="trilha-pdf-iframe">
+                  class="trilha-pdf-iframe"
+                  loading="lazy"
+                  referrerpolicy="no-referrer-when-downgrade"
+                  allow="fullscreen">
           </iframe>
           <div id="trilhaPdfFallback" class="trilha-pdf-fallback" hidden>
             <i data-lucide="file-text"></i>
-            <p>Seu navegador não conseguiu exibir o PDF diretamente.</p>
-            <a id="trilhaPdfFallbackLink" class="btn primary" target="_blank" rel="noopener">
-              <i data-lucide="external-link"></i> Abrir em nova aba
-            </a>
+            <p>Não foi possível exibir o PDF neste navegador.</p>
+            <div class="trilha-pdf-fallback-actions">
+              <a id="trilhaPdfFallbackLink" class="btn primary" target="_blank" rel="noopener">
+                <i data-lucide="external-link"></i> Abrir em nova aba
+              </a>
+              <a id="trilhaPdfFallbackDownload" class="btn secondary" download>
+                <i data-lucide="download"></i> Baixar arquivo
+              </a>
+            </div>
           </div>
         </div>
 
@@ -200,7 +219,8 @@
             <div id="trilhaPdfAplicarLinks" class="trilha-pdf-aplicar-links"></div>
           </div>
           <div class="trilha-pdf-disclaimer">
-            ⚠ Conteúdo educacional. Não constitui recomendação de investimento.
+            <i data-lucide="info" class="trilha-disclaimer-icon"></i>
+            Conteúdo educacional. Não constitui recomendação de investimento.
           </div>
         </div>
       </div>`;
@@ -246,26 +266,40 @@
     const frame    = document.getElementById('trilhaPdfFrame');
     const fallback = document.getElementById('trilhaPdfFallback');
     const fallbackLink = document.getElementById('trilhaPdfFallbackLink');
+    const fallbackDl = document.getElementById('trilhaPdfFallbackDownload');
     const newTab = document.getElementById('trilhaPdfNewTab');
     const download = document.getElementById('trilhaPdfDownload');
     const aplicarLinks = document.getElementById('trilhaPdfAplicarLinks');
 
+    // URL absoluta + parâmetros de visualização (melhora leitura em navegadores modernos)
+    const pdfUrl = resolvePdfUrl(mod.arquivo);
+    const pdfViewUrl = pdfUrl + (pdfUrl.indexOf('#') >= 0 ? '' : '#view=FitH&toolbar=1');
+
     // Resetar estado
-    if (frame) { frame.hidden = false; frame.src = ''; }
+    if (frame) {
+      frame.hidden = false;
+      frame.removeAttribute('src');
+      frame.src = 'about:blank';
+    }
     if (fallback) fallback.hidden = true;
 
     // Preencher informações
-    if (title)  title.textContent = mod.titulo;
+    if (title) title.textContent = mod.titulo;
     if (badge) {
-      badge.textContent = NIVEL_EMOJI[mod.nivel] + ' ' + (NIVEL_LABELS[mod.nivel] || mod.nivel);
+      const iconNivel = NIVEL_ICON[mod.nivel] || 'book-open';
+      badge.innerHTML = '<i data-lucide="' + iconNivel + '" class="trilha-badge-icon"></i> ' + (NIVEL_LABELS[mod.nivel] || mod.nivel);
       badge.style.borderColor = mod.cor;
     }
     if (download) {
-      download.href = mod.arquivo;
-      download.setAttribute('download', mod.arquivo.split('/').pop());
+      download.href = pdfUrl;
+      download.setAttribute('download', (mod.arquivo || '').split('/').pop() || 'modulo.pdf');
     }
-    if (newTab) newTab.href = mod.arquivo;
-    if (fallbackLink) fallbackLink.href = mod.arquivo;
+    if (newTab) newTab.href = pdfUrl;
+    if (fallbackLink) fallbackLink.href = pdfUrl;
+    if (fallbackDl) {
+      fallbackDl.href = pdfUrl;
+      fallbackDl.setAttribute('download', (mod.arquivo || '').split('/').pop() || 'modulo.pdf');
+    }
 
     // Links "Aplicar no Prisma"
     if (aplicarLinks) {
@@ -273,21 +307,38 @@
         <button type="button" class="trilha-aplicar-btn"
                 data-section="${l.section}"
                 onclick="if(window.navigateToSection){window.navigateToSection('${l.section}');document.getElementById('trilhaPdfModal').setAttribute('aria-hidden','true');document.getElementById('trilhaPdfModal').style.display='none';document.body.style.overflow='';}">
-          <i data-lucide="external-link"></i> ${l.label}
+          <i data-lucide="arrow-right"></i> ${l.label}
         </button>`).join('');
     }
 
-    // Carregar PDF no iframe (leve delay para evitar double-render)
-    setTimeout(() => {
-      if (frame) frame.src = mod.arquivo;
-    }, 100);
-
-    // Exibir modal
+    // Exibir modal antes de carregar o PDF (feedback visual imediato)
     overlay.style.display = 'flex';
     overlay.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
 
-    // Foco no botão fechar para acessibilidade
+    // Carregar PDF; se falhar em ~2.5s, mostra fallback com link/download
+    let loaded = false;
+    const onLoad = () => { loaded = true; };
+    if (frame) {
+      frame.addEventListener('load', onLoad, { once: true });
+      setTimeout(() => {
+        if (frame) frame.src = mod.arquivo;
+      }, 50);
+      setTimeout(() => {
+        if (!loaded && frame && !frame.hidden) {
+          // Ainda tenta manter o iframe; só força fallback se src estiver vazio
+          try {
+            const cur = frame.contentWindow && frame.contentWindow.location
+              ? String(frame.contentWindow.location.href || '')
+              : '';
+            if (!cur || cur === 'about:blank') mostrarFallback(pdfUrl);
+          } catch (_) {
+            // cross-origin após load bem-sucedido é normal para PDF — não trata como erro
+          }
+        }
+      }, 2800);
+    }
+
     const closeBtn = document.getElementById('trilhaPdfClose');
     if (closeBtn) closeBtn.focus();
 

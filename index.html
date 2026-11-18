@@ -26,12 +26,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css?v=20261107-dashboard-visual-cleanup-v1" />
   <link rel="stylesheet" href="css/prisma-premium.css?v=20260907-premium" />
-  <link rel="stylesheet" href="css/prisma-modern.css?v=20261106-dashboard-empty-state-v1" />
+  <link rel="stylesheet" href="css/prisma-modern.css?v=20261118-cartoes-refine-v1" />
   <link rel="stylesheet" href="css/prisma-redesign.css?v=20261109-pdf-fallback-hidden-v1" />
   <link rel="stylesheet" href="css/prisma-finance-center.css?v=20261104-finance-modals-v1" />
   <link rel="stylesheet" href="css/prisma-lgpd.css?v=20261103-welcome-fullscreen-brand-v5" />
   <link rel="stylesheet" href="css/prisma-dashboard-premium.css?v=20261111-auth-switch-layout-v2" />
-  <link rel="stylesheet" href="css/responsive.css?v=20261116-mobile-tablet-v1" />
+  <link rel="stylesheet" href="css/responsive.css?v=20261118-responsive-fixes-v2" />
   <link rel="stylesheet" href="css/prisma-mobile.css?v=20261118-mobile-architecture-v1" />
 </head>
 <body>
@@ -483,8 +483,11 @@
           </div>
           <span class="logo-text">Prisma</span>
         </a>
+        <button type="button" class="sidebar-close" id="sidebarCloseBtn" aria-label="Fechar menu" aria-controls="sidebar">
+          <i data-lucide="x"></i>
+        </button>
       </div>
-      <nav class="sidebar-nav">
+      <nav class="sidebar-nav" aria-label="Navegação principal">
         <a href="#" class="nav-item active" data-section="dashboard">
           <i data-lucide="layout-dashboard"></i>
           <span>Dashboard</span>
@@ -568,7 +571,7 @@
     </aside>
 
     <!-- Overlay mobile -->
-    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <div class="sidebar-overlay" id="sidebarOverlay" aria-hidden="true"></div>
 
     <!-- ===================== MAIN ===================== -->
     <main class="main">
@@ -578,6 +581,10 @@
           <button type="button" class="mobile-menu" id="mobileMenu" aria-label="Abrir menu" aria-expanded="false" aria-controls="sidebar">
             <i data-lucide="menu"></i>
           </button>
+          <a class="mobile-brand" href="#/tela/dashboard" aria-label="Prisma — Dashboard">
+            <img src="assets/images/logo-mark.png" alt="" width="28" height="32" decoding="async" />
+            <span>Prisma</span>
+          </a>
           <div class="search-box" id="globalSearchBox">
             <i data-lucide="search"></i>
             <input type="search" id="globalSearchInput" placeholder="Pesquisar transações, contas, metas..." autocomplete="off" aria-label="Busca global" aria-expanded="false" aria-controls="globalSearchResults" />
@@ -2379,62 +2386,81 @@
           <div class="modal-overlay" id="modalEduQuizzes" style="display: none;" role="dialog" aria-labelledby="titleEduQuizzes">
             <div class="modal-container edu-large-modal">
               <div class="modal-header">
-                <h3 id="titleEduQuizzes"><i data-lucide="target"></i> Quizzes, Desafio Diário e Conquistas</h3>
+                <h3 id="titleEduQuizzes"><i data-lucide="target"></i> Centro de Aprendizado</h3>
                 <button type="button" class="modal-close" id="closeEduQuizzes" aria-label="Fechar"><i data-lucide="x"></i></button>
               </div>
-              <div class="modal-body" style="padding: 1.25rem;">
+              <div class="modal-body edu-quiz-modal-body">
+                <div class="edu-quiz-tabs" role="tablist" aria-label="Seções do centro de aprendizado">
+                  <button type="button" class="edu-quiz-tab active" role="tab" aria-selected="true" data-edu-tab="quizzes" id="eduTabQuizzes">
+                    <i data-lucide="help-circle"></i> Quizzes
+                  </button>
+                  <button type="button" class="edu-quiz-tab" role="tab" aria-selected="false" data-edu-tab="desafio" id="eduTabDesafio">
+                    <i data-lucide="zap"></i> Desafio do dia
+                  </button>
+                  <button type="button" class="edu-quiz-tab" role="tab" aria-selected="false" data-edu-tab="conquistas" id="eduTabConquistas">
+                    <i data-lucide="trophy"></i> Conquistas
+                  </button>
+                </div>
+
                 <!-- Hub de Quizzes -->
-                <div class="edu-quiz-hub card" id="eduQuizHub" style="margin-bottom: 1.25rem;">
-                  <div class="edu-quiz-hub-head">
-                    <div>
-                      <span class="education-mini-label">QUIZZES</span>
-                      <h3>Teste seus conhecimentos</h3>
-                      <p class="text-muted" style="font-size:0.85rem;margin:0.25rem 0 0;">+10 XP por acerto · feedback imediato com explicação</p>
+                <div class="edu-quiz-pane active" id="eduPaneQuizzes" role="tabpanel">
+                  <div class="edu-quiz-hub card" id="eduQuizHub">
+                    <div class="edu-quiz-hub-head">
+                      <div>
+                        <span class="education-mini-label">QUIZZES</span>
+                        <h3>Teste seus conhecimentos</h3>
+                        <p class="text-muted edu-quiz-hub-sub">+10 XP por acerto · feedback imediato com explicação</p>
+                      </div>
+                      <select id="eduQuizLevelSelect" class="carteira-sort" aria-label="Nível do quiz">
+                        <option value="iniciante">Iniciante</option>
+                        <option value="intermediario">Intermediário</option>
+                        <option value="avancado">Avançado</option>
+                      </select>
                     </div>
-                    <select id="eduQuizLevelSelect" class="carteira-sort" aria-label="Nível do quiz">
-                      <option value="iniciante">Iniciante</option>
-                      <option value="intermediario">Intermediário</option>
-                      <option value="avancado">Avançado</option>
-                    </select>
-                  </div>
-                  <div class="edu-quiz-list" id="eduQuizList"></div>
-                  <div class="edu-quiz-player" id="eduQuizPlayer" hidden>
-                    <div class="edu-quiz-progress"><span id="eduQuizProgressBar"></span></div>
-                    <p class="edu-quiz-counter" id="eduQuizCounter">1 / 5</p>
-                    <h4 id="eduQuizQuestion">Pergunta</h4>
-                    <div class="education-answers" id="eduQuizAnswers"></div>
-                    <div class="education-challenge-feedback" id="eduQuizFeedback"></div>
-                    <div class="edu-quiz-actions">
-                      <button class="btn secondary btn-sm" id="eduQuizExit">Sair</button>
-                      <button class="btn primary btn-sm" id="eduQuizNext" hidden>Próxima</button>
+                    <div class="edu-quiz-list" id="eduQuizList"></div>
+                    <div class="edu-quiz-player" id="eduQuizPlayer" hidden>
+                      <div class="edu-quiz-progress"><span id="eduQuizProgressBar"></span></div>
+                      <p class="edu-quiz-counter" id="eduQuizCounter">1 / 5</p>
+                      <h4 id="eduQuizQuestion">Pergunta</h4>
+                      <div class="education-answers" id="eduQuizAnswers"></div>
+                      <div class="education-challenge-feedback" id="eduQuizFeedback"></div>
+                      <div class="edu-quiz-actions">
+                        <button class="btn secondary btn-sm" id="eduQuizExit"><i data-lucide="x"></i> Sair</button>
+                        <button class="btn primary btn-sm" id="eduQuizNext" hidden><i data-lucide="arrow-right"></i> Próxima</button>
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 <!-- Desafio do Dia -->
-                <div class="education-challenge card" style="margin-bottom: 1.25rem;">
-                  <div class="education-challenge-head">
-                    <div>
-                      <span class="education-mini-label">DESAFIO DO DIA</span>
-                      <h3 id="educationChallengeTitle">Descubra quanto você realmente pode gastar</h3>
+                <div class="edu-quiz-pane" id="eduPaneDesafio" role="tabpanel" hidden>
+                  <div class="education-challenge card" id="eduChallengeCard">
+                    <div class="education-challenge-head">
+                      <div>
+                        <span class="education-mini-label">DESAFIO DO DIA</span>
+                        <h3 id="educationChallengeTitle">Descubra quanto você realmente pode gastar</h3>
+                      </div>
+                      <span class="challenge-points"><i data-lucide="sparkles"></i> +20 XP</span>
                     </div>
-                    <span class="challenge-points">+20 XP</span>
+                    <p id="educationChallengeQuestion">Quanto deve sobrar, idealmente, da sua renda para construir uma reserva financeira?</p>
+                    <div class="education-answers" id="educationChallengeAnswers">
+                      <button class="education-answer" data-correct="false">Nada, se todas as contas estiverem pagas</button>
+                      <button class="education-answer" data-correct="true">Uma parte da renda, conforme seu orçamento</button>
+                      <button class="education-answer" data-correct="false">Sempre 50% da renda</button>
+                      <button class="education-answer" data-correct="false">Somente quando houver uma emergência</button>
+                    </div>
+                    <div class="education-challenge-feedback" id="educationChallengeFeedback"></div>
                   </div>
-                  <p id="educationChallengeQuestion">Quanto deve sobrar, idealmente, da sua renda para construir uma reserva financeira?</p>
-                  <div class="education-answers" id="educationChallengeAnswers">
-                    <button class="education-answer" data-correct="false">Nada, se todas as contas estiverem pagas</button>
-                    <button class="education-answer" data-correct="true">Uma parte da renda, conforme seu orçamento</button>
-                    <button class="education-answer" data-correct="false">Sempre 50% da renda</button>
-                    <button class="education-answer" data-correct="false">Somente quando houver uma emergência</button>
-                  </div>
-                  <div class="education-challenge-feedback" id="educationChallengeFeedback"></div>
                 </div>
 
                 <!-- Conquistas -->
-                <div class="edu-achievements card" id="eduAchievements">
-                  <span class="education-mini-label">CONQUISTAS</span>
-                  <h3>Suas medalhas de progresso</h3>
-                  <div class="edu-achievements-grid" id="eduAchievementsGrid"></div>
+                <div class="edu-quiz-pane" id="eduPaneConquistas" role="tabpanel" hidden>
+                  <div class="edu-achievements card" id="eduAchievements">
+                    <span class="education-mini-label">CONQUISTAS</span>
+                    <h3>Suas medalhas de progresso</h3>
+                    <p class="text-muted edu-quiz-hub-sub">Desbloqueie medalhas ao concluir quizzes e trilhas.</p>
+                    <div class="edu-achievements-grid" id="eduAchievementsGrid"></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2669,6 +2695,7 @@
             <button class="btn export email"><i data-lucide="mail"></i> Enviar por e-mail</button>
             <button class="btn export excel"><i data-lucide="table"></i> Exportar Excel</button>
             <button class="btn export csv"><i data-lucide="download"></i> Exportar CSV</button>
+            <button class="btn export zip" type="button" title="Backup local em ZIP (CSV + JSON)"><i data-lucide="archive"></i> Exportar ZIP</button>
           </div>
           <div class="card chart-card">
             <div class="card-head">
@@ -2683,7 +2710,7 @@
         <!-- ============ PRISMA AI ============ -->
         <section class="section" id="prisma-ai">
           <div class="card ai-main-card fade-in">
-    <!-- ÁREA A: CABEÇALHO INTELIGENTE COMPACTO -->
+    <!-- ÁREA A: CABEÇALHO COMPACTO -->
     <div class="ai-smart-header">
       <div class="ai-brand-group">
         <div class="ai-brand-avatar">
@@ -2694,7 +2721,7 @@
             <h2>Prisma AI</h2>
             <span class="status-live"><span class="pulse"></span> Online</span>
           </div>
-          <p class="ai-subtitle">Consultor financeiro inteligente baseado em seus dados reais.</p>
+          <p class="ai-subtitle">Consultor com base nos seus dados reais</p>
         </div>
       </div>
       <div class="ai-header-controls">
@@ -2706,17 +2733,19 @@
           <button type="button" class="ai-period-btn" data-period="1y">1a</button>
           <button type="button" class="ai-period-btn" data-period="all">Tudo</button>
         </div>
-        <button class="btn secondary btn-sm" id="aiPdfBtn" title="Exportar relatório executivo em PDF">
-          <i data-lucide="file-text"></i> PDF
-        </button>
-        <button class="btn secondary btn-sm" id="aiResetBtn" title="Reiniciar análise e limpar conversa">
-          <i data-lucide="refresh-ccw"></i> Reiniciar
-        </button>
-        <button class="btn secondary btn-sm" id="aiToggleCockpitBtn" title="Visualizar Cockpit de Saúde e Gráficos">
-          <i data-lucide="bar-chart-2"></i> Cockpit
-        </button>
-        <button class="btn primary btn-sm ai-analyze-btn" id="aiAnalyze" title="Executar análise completa das finanças" style="display:none;">
-          <i data-lucide="sparkles"></i> Analisar Finanças
+        <div class="ai-header-tools" role="group" aria-label="Ferramentas">
+          <button type="button" class="btn secondary btn-sm ai-tool-btn" id="aiPdfBtn" title="Exportar PDF">
+            <i data-lucide="file-text"></i><span class="ai-tool-label">PDF</span>
+          </button>
+          <button type="button" class="btn secondary btn-sm ai-tool-btn" id="aiResetBtn" title="Limpar conversa">
+            <i data-lucide="refresh-ccw"></i><span class="ai-tool-label">Limpar</span>
+          </button>
+          <button type="button" class="btn secondary btn-sm ai-tool-btn" id="aiToggleCockpitBtn" title="Métricas e gráficos">
+            <i data-lucide="bar-chart-2"></i><span class="ai-tool-label">Métricas</span>
+          </button>
+        </div>
+        <button type="button" class="btn primary btn-sm ai-analyze-btn" id="aiAnalyze" title="Executar análise completa" hidden>
+          <i data-lucide="sparkles"></i> Analisar
         </button>
       </div>
     </div>
@@ -2811,27 +2840,27 @@
     </div>
 
     <!-- ÁREA C: AÇÕES INTELIGENTES (5 CATEGORIAS VISUAIS COMPACTAS) -->
-    <div class="ai-smart-actions-container">
-      <div class="ai-smart-actions-grid" id="aiSmartActionsGrid">
+        <div class="ai-smart-actions-container" id="aiSmartActionsContainer">
+      <div class="ai-smart-actions-grid" id="aiSmartActionsGrid" role="group" aria-label="Ações principais">
         <button type="button" class="ai-smart-action-btn" data-ai-action="gastos" data-question="analisar-gastos" id="btnActionAnalisar">
-          <i data-lucide="sparkles"></i>
-          <span>1. Analisar meus gastos</span>
+          <i data-lucide="pie-chart"></i>
+          <span>Analisar gastos</span>
         </button>
         <button type="button" class="ai-smart-action-btn" data-ai-action="economizar" data-question="como-economizar" id="btnActionEconomizar">
           <i data-lucide="scissors"></i>
-          <span>2. Como posso economizar?</span>
+          <span>Onde economizar</span>
         </button>
         <button type="button" class="ai-smart-action-btn" data-ai-action="investimentos" data-question="avaliar-investimentos" id="btnActionInvestimentos">
           <i data-lucide="trending-up"></i>
-          <span>3. Avaliar meus investimentos</span>
+          <span>Investimentos</span>
         </button>
         <button type="button" class="ai-smart-action-btn" data-ai-action="planejar" data-question="planejar-financas" id="btnActionPlanejar">
           <i data-lucide="target"></i>
-          <span>4. Planejar minhas finanças</span>
+          <span>Planejar</span>
         </button>
         <button type="button" class="ai-smart-action-btn" data-ai-action="relatorio" data-question="gerar-relatorio" id="btnActionRelatorio">
           <i data-lucide="file-text"></i>
-          <span>5. Gerar relatório financeiro</span>
+          <span>Relatório</span>
         </button>
       </div>
     </div>
@@ -2845,9 +2874,8 @@
             <img src="assets/images/logo-mark.png" alt="Prisma AI" width="22" height="22" />
           </div>
           <div class="bubble">
-            <p class="ai-greeting-title">Olá! Vamos analisar sua vida financeira?</p>
-            <p class="ai-greeting-desc">Posso ajudar você a entender seus gastos, identificar oportunidades e tomar decisões financeiras melhores.</p>
-            <p class="ai-greeting-hint">Clique em uma das <strong>Ações Inteligentes</strong> acima ou envie uma mensagem direta abaixo.</p>
+            <p class="ai-greeting-title">Olá! Sou o Prisma AI.</p>
+            <p class="ai-greeting-desc">Analiso seus dados reais e respondo sobre gastos, poupança, metas e investimentos. Escolha uma ação acima ou pergunte abaixo.</p>
           </div>
         </div>
       </div>
@@ -2862,12 +2890,12 @@
         </div>
       </div>
 
-      <!-- Chips de Perguntas Rápidas Complementares -->
+      <!-- Atalhos complementares (sem duplicar as ações principais) -->
       <div class="ai-quick-questions" id="aiQuickQuestions">
-        <button type="button" class="ai-quick-btn" data-question="Onde posso cortar gastos?"><i data-lucide="scissors"></i> Onde cortar gastos?</button>
-        <button type="button" class="ai-quick-btn" data-question="Como está minha taxa de poupança?"><i data-lucide="shield-check"></i> Minha poupança</button>
-        <button type="button" class="ai-quick-btn" data-question="Tenho assinaturas desnecessárias?"><i data-lucide="repeat"></i> Assinaturas ativas</button>
-        <button type="button" class="ai-quick-btn" data-question="Resumo das minhas finanças"><i data-lucide="pie-chart"></i> Resumo executivo</button>
+        <button type="button" class="ai-quick-btn" data-question="Tenho assinaturas desnecessárias?"><i data-lucide="repeat"></i> Assinaturas</button>
+        <button type="button" class="ai-quick-btn" data-question="Estou no caminho da minha meta?"><i data-lucide="target"></i> Minhas metas</button>
+        <button type="button" class="ai-quick-btn" data-question="Gerar plano mensal"><i data-lucide="clipboard-list"></i> Plano mensal</button>
+        <button type="button" class="ai-quick-btn" data-question="Como está minha taxa de poupança?"><i data-lucide="shield-check"></i> Poupança</button>
       </div>
 
       <!-- Barra de Entrada Fixa e Acessível (Android Friendly) -->
@@ -3197,7 +3225,11 @@
           <!-- Section Admin -->
           <section class="section" id="admin" style="display:none">
             <div class="section-header"><div><span class="eyebrow">Administração</span><h2>Painel Administrativo</h2><p>Gerencie usuários e permissões do Prisma.</p></div><div class="section-actions"><button type="button" class="btn btn-primary" id="addAdminBtn"><i data-lucide="user-plus"></i> Adicionar administrador</button></div></div>
-            <div class="card" style="overflow:auto"><table class="data-table" id="adminUsersTable"><thead><tr><th>Usuário</th><th>E-mail</th><th>Role</th><th>Status</th><th>Último acesso</th><th>Ações</th></tr></thead><tbody></tbody></table></div>
+            <div class="card admin-users-table-card">
+              <div class="table-responsive">
+                <table class="data-table" id="adminUsersTable"><thead><tr><th>Usuário</th><th>E-mail</th><th>Role</th><th>Status</th><th>Último acesso</th><th>Ações</th></tr></thead><tbody></tbody></table>
+              </div>
+            </div>
           </section>
       </div>
 
@@ -3978,8 +4010,12 @@
 
   <!-- Critical path: UI icons + charts for dashboard. jsPDF loaded on-demand when exporting PDF. -->
   <script src="js/prisma-storage.js"></script>
+  <script src="js/prisma-device.js"></script>
   <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+  <!-- Zoom/pan touch support + Chart.js zoom plugin (interatividade) -->
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js" defer></script>
   <script src="js/prisma-bank-sync.js?v=20260911-perf" defer></script>
   <script src="js/prisma-finance-engine.js" defer></script>
   <script src="js/prisma-monitoring-center.js" defer></script>
@@ -3987,9 +4023,9 @@
   <script src="js/prisma-config.js"></script>
   <script src="js/firebase-config.js"></script>
   <script type="module" src="js/firebase-client.js"></script>
-  <script src="js/prisma-ai-engine.js?v=20261118-intent-engine-v1"></script>
-  <script src="js/script.js?v=20261118-phase5-v1" defer></script>
-  <script src="js/prisma-enhancements.js?v=20261106-dashboard-empty-state-v2" defer></script>
+  <script src="js/prisma-ai-engine.js?v=20261118-greeting-v2"></script>
+  <script src="js/script.js?v=20261118-cartoes-refine-v1" defer></script>
+  <script src="js/prisma-enhancements.js?v=20261118-ai-ui-slim-v1" defer></script>
   <!-- Catálogo de ativos: sob demanda quando a seção de investimentos é usada -->
   <script src="js/prisma-assets-catalog.js?v=20260911-perf" defer></script>
   <script src="js/prisma-patch.js" defer></script>

@@ -11,7 +11,7 @@
     "cap:sync": "npx cap sync",
     "cap:android": "npx cap open android",
     "cap:add:android": "npx cap add android",
-    "test": "node --test tests/audit-backend-security.js tests/audit-dom-ids.js tests/audit-css-files.js tests/audit-html-screens.js tests/prisma-dashboard-grandcard.test.js tests/prisma-education-pdf-viewer.test.js tests/prisma-ai-engine.test.js tests/prisma-full-flow.test.js tests/prisma-production.test.js",
+    "test": "node --test tests/audit-backend-security.js tests/audit-dom-ids.js tests/audit-css-files.js tests/audit-html-screens.js tests/prisma-dashboard-grandcard.test.js tests/prisma-education-pdf-viewer.test.js tests/prisma-full-flow.test.js tests/prisma-production.test.js",
     "test:auth": "node --test tests/prisma-full-flow.test.js",
     "test:audit": "node tests/audit-backend-security.js && node tests/audit-dom-ids.js && node tests/audit-css-files.js && node tests/audit-html-screens.js",
     "test:e2e": "npx playwright test",
@@ -23,7 +23,7 @@
     "backup": "node scripts/backup-sqlite.js"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": "^22.13.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1"

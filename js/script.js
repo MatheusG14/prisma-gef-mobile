@@ -25,6 +25,262 @@ let cfDistributionType = 'despesa';
 let chartsInitialized = false;
 let monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
+/* ========== Performance + interatividade Chart.js ========== */
+const PRISMA_CHART_PERF = {
+  animationDuration: 400,
+  resizeDebounceMs: 180,
+  maxDevicePixelRatio: 2
+};
+let _prismaChartResizeTimer = null;
+let _prismaZoomRegistered = false;
+
+function prismaFmtBRL(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 'R$ 0,00';
+  try {
+    if (typeof fmtMoney === 'function') return fmtMoney(n);
+    if (typeof formatCurrency === 'function') return formatCurrency(n);
+  } catch (_) { }
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function prismaFmtBRLCompact(value) {
+  const n = Number(value) || 0;
+  const abs = Math.abs(n);
+  if (abs >= 1e6) return 'R$ ' + (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mi';
+  if (abs >= 1e3) return 'R$ ' + (n / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mil';
+  return prismaFmtBRL(n);
+}
+
+/** Tooltip padrão em R$ para séries cartesianas (line/bar). */
+function prismaTooltipBRL(extra = {}) {
+  return Object.assign({
+    backgroundColor: 'rgba(15,23,42,0.96)',
+    borderColor: 'rgba(56,189,248,0.35)',
+    borderWidth: 1,
+    titleColor: '#E2E8F0',
+    bodyColor: '#CBD5E1',
+    padding: 12,
+    cornerRadius: 10,
+    displayColors: true,
+    callbacks: {
+      label: (ctx) => {
+        const label = ctx.dataset?.label ? String(ctx.dataset.label) + ': ' : '';
+        let raw = ctx.parsed;
+        if (raw && typeof raw === 'object') {
+          raw = raw.y != null ? raw.y : (raw.x != null ? raw.x : ctx.raw);
+        }
+        return ' ' + label + prismaFmtBRL(raw);
+      }
+    }
+  }, extra);
+}
+
+/** Tooltip em R$ + % para pizza/rosca. */
+function prismaTooltipPieBRL(total, extra = {}) {
+  return Object.assign({
+    backgroundColor: 'rgba(15,23,42,0.96)',
+    borderColor: 'rgba(56,189,248,0.3)',
+    borderWidth: 1,
+    padding: 10,
+    cornerRadius: 8,
+    callbacks: {
+      label: (ctx) => {
+        const v = Number(ctx.raw) || 0;
+        const pct = total > 0 ? (v / total) * 100 : 0;
+        return ` ${ctx.label}: ${prismaFmtBRL(v)} (${pct.toFixed(1)}%)`;
+      }
+    }
+  }, extra);
+}
+
+/** Zoom + pan (roda = zoom, arrastar = pan, duplo clique = reset). */
+function prismaZoomPluginOpts(axis = 'x') {
+  return {
+    zoom: {
+      wheel: { enabled: true, speed: 0.08 },
+      pinch: { enabled: true },
+      mode: axis,
+      drag: { enabled: false }
+    },
+    pan: {
+      enabled: true,
+      mode: axis,
+      modifierKey: null
+    },
+    limits: {
+      x: { min: 'original', max: 'original' },
+      y: { min: 'original', max: 'original' }
+    }
+  };
+}
+
+/** Decimation LTTB para linhas com muitos pontos. */
+function prismaDecimationOpts(enabled = true) {
+  return {
+    decimation: {
+      enabled: !!enabled,
+      algorithm: 'lttb',
+      samples: 200,
+      threshold: 120
+    }
+  };
+}
+
+function prismaRegisterZoomPlugin() {
+  if (_prismaZoomRegistered || typeof window.Chart === 'undefined') return;
+  try {
+    const plugin = window.ChartZoom || window['chartjs-plugin-zoom'];
+    if (plugin && typeof window.Chart.register === 'function') {
+      window.Chart.register(plugin);
+      _prismaZoomRegistered = true;
+    }
+  } catch (_) { }
+}
+
+function prismaApplyChartDefaults() {
+  if (typeof window.Chart === 'undefined' || !window.Chart.defaults) return;
+  try {
+    prismaRegisterZoomPlugin();
+    const d = window.Chart.defaults;
+    d.animation = d.animation || {};
+    d.animation.duration = PRISMA_CHART_PERF.animationDuration;
+    d.animations = d.animations || {};
+    if (d.transitions) {
+      d.transitions.active = d.transitions.active || {};
+      d.transitions.active.animation = { duration: PRISMA_CHART_PERF.animationDuration };
+      d.transitions.resize = d.transitions.resize || {};
+      d.transitions.resize.animation = { duration: 0 };
+    }
+    d.responsive = true;
+    d.maintainAspectRatio = false;
+    if (typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > PRISMA_CHART_PERF.maxDevicePixelRatio) {
+      d.devicePixelRatio = PRISMA_CHART_PERF.maxDevicePixelRatio;
+    }
+    d.plugins = d.plugins || {};
+    d.plugins.legend = d.plugins.legend || {};
+    d.plugins.tooltip = d.plugins.tooltip || {};
+    d.plugins.tooltip.animation = { duration: 120 };
+  } catch (_) { }
+}
+
+function prismaChartOpts(extra = {}) {
+  const base = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: PRISMA_CHART_PERF.animationDuration, easing: 'easeOutQuart' },
+    interaction: { mode: 'index', intersect: false },
+    devicePixelRatio: Math.min(window.devicePixelRatio || 1, PRISMA_CHART_PERF.maxDevicePixelRatio)
+  };
+  // merge raso + plugins
+  const out = Object.assign({}, base, extra);
+  if (extra.plugins || base.plugins) {
+    out.plugins = Object.assign({}, base.plugins || {}, extra.plugins || {});
+  }
+  return out;
+}
+
+/** Opções prontas para gráfico de linha/barra com zoom, pan, decimation e tooltip R$. */
+function prismaInteractiveLineOpts(extra = {}) {
+  prismaRegisterZoomPlugin();
+  const zoomOn = _prismaZoomRegistered;
+  const plugins = Object.assign({
+    legend: { display: false },
+    tooltip: prismaTooltipBRL(),
+    ...prismaDecimationOpts(true)
+  }, extra.plugins || {});
+  if (zoomOn) plugins.zoom = Object.assign(prismaZoomPluginOpts('x'), (extra.plugins && extra.plugins.zoom) || {});
+  const scales = Object.assign({
+    x: { grid: { display: false }, ticks: { color: '#64748B', maxRotation: 0 }, border: { display: false } },
+    y: {
+      grid: { color: 'rgba(148,163,184,0.08)' },
+      ticks: { color: '#64748B', callback: (v) => prismaFmtBRLCompact(v) },
+      border: { display: false }
+    }
+  }, extra.scales || {});
+  const rest = Object.assign({}, extra);
+  delete rest.plugins;
+  delete rest.scales;
+  return prismaChartOpts(Object.assign({}, rest, { plugins, scales }));
+}
+
+/** Atualiza dados sem recriar a instância (bem mais leve que destroy+new). */
+function prismaUpdateChartData(chart, labels, datasetsData) {
+  if (!chart || !chart.data) return false;
+  try {
+    if (labels) chart.data.labels = labels;
+    if (Array.isArray(datasetsData)) {
+      datasetsData.forEach((data, i) => {
+        if (chart.data.datasets[i]) chart.data.datasets[i].data = data;
+      });
+    }
+    chart.update('none');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function prismaSafeDestroyChart(chart) {
+  if (!chart) return null;
+  try {
+    if (typeof chart.destroy === 'function') chart.destroy();
+  } catch (_) { }
+  return null;
+}
+
+/** Duplo clique no canvas reseta zoom/pan (quando o plugin estiver ativo). */
+function prismaBindResetZoom(chart, canvas) {
+  if (!chart || !canvas || canvas.dataset.prismaZoomReset === '1') return;
+  canvas.dataset.prismaZoomReset = '1';
+  canvas.title = (canvas.title ? canvas.title + ' · ' : '') + 'Roda: zoom · Arrastar: pan · Duplo clique: resetar';
+  canvas.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    try {
+      if (typeof chart.resetZoom === 'function') chart.resetZoom();
+    } catch (_) { }
+  });
+  // Dica visual discreta no container
+  try {
+    const wrap = canvas.parentElement;
+    if (wrap && !wrap.querySelector('.chart-zoom-hint')) {
+      const hint = document.createElement('span');
+      hint.className = 'chart-zoom-hint';
+      hint.textContent = 'Scroll zoom · Arraste pan · 2× clique reset';
+      wrap.appendChild(hint);
+    }
+  } catch (_) { }
+}
+
+function prismaResizeAllCharts() {
+  const charts = [
+    cashflowChart, pieChart, incomePieChart, reportChart, portfolioChart,
+    typeof portfolioEvolutionChart !== 'undefined' ? portfolioEvolutionChart : null,
+    typeof portfolioLucroChart !== 'undefined' ? portfolioLucroChart : null,
+    typeof portfolioProjecaoChart !== 'undefined' ? portfolioProjecaoChart : null,
+    cfFlowChartInstance, cfDistributionChartInstance
+  ];
+  charts.forEach((c) => {
+    try { if (c && typeof c.resize === 'function') c.resize(); } catch (_) { }
+  });
+}
+
+function prismaDebouncedResizeCharts() {
+  clearTimeout(_prismaChartResizeTimer);
+  _prismaChartResizeTimer = setTimeout(prismaResizeAllCharts, PRISMA_CHART_PERF.resizeDebounceMs);
+}
+
+if (typeof window.Chart !== 'undefined') prismaApplyChartDefaults();
+else {
+  const _chartReady = setInterval(() => {
+    if (typeof window.Chart !== 'undefined') {
+      clearInterval(_chartReady);
+      prismaApplyChartDefaults();
+    }
+  }, 200);
+  setTimeout(() => clearInterval(_chartReady), 15000);
+}
+
 function getInitialStorageProfiles() {
   try {
     return JSON.parse(localStorage.getItem(BASE_STORAGE_KEYS?.profiles || 'prisma_profiles_data') || '[]');
@@ -50,9 +306,46 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function isMobileSidebarOpen() {
-    return window.innerWidth < 1024 && document.getElementById('sidebar')?.classList.contains('open');
+  function isMobileViewport() {
+    if (window.PrismaDevice && typeof window.PrismaDevice.isMobile === 'function') {
+      return window.PrismaDevice.isMobile() || window.PrismaDevice.isTablet();
+    }
+    return window.innerWidth < 1024;
   }
+
+  function isMobileSidebarOpen() {
+    return isMobileViewport() && document.getElementById('sidebar')?.classList.contains('open');
+  }
+
+  // Adapta UI quando muda PC ↔ mobile (sidebar, zoom de gráficos, classes)
+  function applyDeviceAdaptations(device) {
+    const d = device || (window.PrismaDevice && window.PrismaDevice.getState && window.PrismaDevice.getState()) || {};
+    const mobileLike = !!(d.isMobile || d.isTablet);
+    try {
+      // Sidebar: no mobile começa fechada; no desktop permanece o estado do usuário
+      const sidebar = document.getElementById('sidebar');
+      if (sidebar && mobileLike && !sidebar.classList.contains('open')) {
+        // nada — mantém fechada
+      }
+      // Zoom: em touch prioriza pinch; em desktop wheel
+      if (typeof prismaZoomPluginOpts === 'function' && cashflowChart && cashflowChart.options && cashflowChart.options.plugins && cashflowChart.options.plugins.zoom) {
+        const z = cashflowChart.options.plugins.zoom;
+        if (z.zoom && z.zoom.wheel) z.zoom.wheel.enabled = !d.isTouch;
+        if (z.zoom && z.zoom.pinch) z.zoom.pinch.enabled = true;
+        if (z.pan) z.pan.enabled = true;
+      }
+      // Redimensiona gráficos após troca de orientação/viewport
+      if (typeof prismaDebouncedResizeCharts === 'function') prismaDebouncedResizeCharts();
+    } catch (_) { }
+  }
+
+  if (window.PrismaDevice && typeof window.PrismaDevice.onChange === 'function') {
+    window.PrismaDevice.onChange(function (next) {
+      applyDeviceAdaptations(next);
+    });
+  }
+  // Primeira aplicação
+  setTimeout(function () { applyDeviceAdaptations(); }, 0);
 
   function hasPageScrollOverlay() {
     return hasVisibleModalOverlay() || isMobileSidebarOpen();
@@ -149,13 +442,13 @@ document.addEventListener('DOMContentLoaded', () => {
         _iconRaf = requestAnimationFrame(() => {
           _iconRaf = 0;
           _iconLast = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-          try { lucide.createIcons(); } catch (_) {}
+          try { lucide.createIcons(); } catch (_) { }
         });
       }
       return;
     }
     _iconLast = now;
-    try { lucide.createIcons(); } catch (_) {}
+    try { lucide.createIcons(); } catch (_) { }
   }
   // Primeira passada após scripts — adiada ao próximo frame (não bloqueia parse)
   if (typeof requestAnimationFrame === 'function') {
@@ -176,9 +469,9 @@ document.addEventListener('DOMContentLoaded', () => {
           performance.measure('prisma-boot', 'prisma-script-start', 'prisma-window-load');
           const m = performance.getEntriesByName('prisma-boot')[0];
           if (m) console.info('[PrismaPerf] script→load:', Math.round(m.duration) + 'ms');
-        } catch (_) {}
+        } catch (_) { }
       }, { once: true });
-    } catch (_) {}
+    } catch (_) { }
   })();
 
 
@@ -232,28 +525,48 @@ document.addEventListener('DOMContentLoaded', () => {
     toast._timeout = setTimeout(() => toast.classList.remove('show'), action ? 5000 : 2800);
     try {
       window.dispatchEvent(new CustomEvent('prisma:toast', { detail: { message: String(message || '') } }));
-    } catch (_) {}
+    } catch (_) { }
     try {
       if (typeof window.PrismaMaybePersistToast === 'function') window.PrismaMaybePersistToast(message);
-    } catch (_) {}
+    } catch (_) { }
   }
   window.showToast = showToast;
 
   // AI Bot Message System
   const aiChat = document.getElementById('aiChat');
-  
-  function addBotMessage(message) {
+
+  function addBotMessage(message, options = {}) {
     if (!aiChat) return;
-    
+
     const msgDiv = document.createElement('div');
     msgDiv.className = 'ai-msg bot';
+    msgDiv.setAttribute('aria-live', 'polite');
+
+    const formatted = escapeHtml(String(message || ''))
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/\n/g, '<br>');
+
+    let actionHtml = '';
+    if (options.action && options.action.section && options.action.label) {
+      actionHtml = `<div class="ai-msg-action" style="margin-top:8px;"><button type="button" class="btn primary btn-sm ai-action-btn" data-section="${escapeHtml(options.action.section)}"><i data-lucide="arrow-right"></i> ${escapeHtml(options.action.label)}</button></div>`;
+    }
+
+    let chipsHtml = '';
+    if (Array.isArray(options.chips) && options.chips.length > 0) {
+      chipsHtml = `<div class="ai-chips-group" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;">${options.chips.map(c => `<button type="button" class="ai-quick-btn" data-question="${escapeHtml(c.query || c.label)}">${escapeHtml(c.label)}</button>`).join('')}</div>`;
+    }
+
     msgDiv.innerHTML = `
       <span class="ai-avatar"><i data-lucide="bot"></i></span>
-      <div class="bubble">${escapeHtml(message).replace(/\n/g, '<br>')}</div>
+      <div class="bubble">${formatted}${actionHtml}${chipsHtml}</div>
     `;
-    
+
+    const isNearBottom = aiChat.scrollHeight - aiChat.scrollTop - aiChat.clientHeight < 160;
     aiChat.appendChild(msgDiv);
-    aiChat.scrollTop = aiChat.scrollHeight;
+    if (isNearBottom) {
+      aiChat.scrollTo({ top: aiChat.scrollHeight, behavior: 'smooth' });
+    }
     refreshIcons();
   }
 
@@ -332,7 +645,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Format Currency
-  ['receitaValor','despesaValor','contaSaldo','investValor','investLucro','metaAtual','metaAlvo','profileSaldo','profileSalario'].forEach(normalizeMoneyField);
+  ['receitaValor', 'despesaValor', 'contaSaldo', 'investValor', 'investLucro', 'metaAtual', 'metaAlvo', 'profileSaldo', 'profileSalario'].forEach(normalizeMoneyField);
 
   function formatCurrency(value) {
     return new Intl.NumberFormat('pt-BR', {
@@ -442,7 +755,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Função para gerar chaves específicas do perfil
   function getProfileStorageKeys(profileId) {
     if (!profileId) return BASE_STORAGE_KEYS;
-    
+
     return {
       receitas: `prisma_receitas_data_${profileId}`,
       despesas: `prisma_despesas_data_${profileId}`,
@@ -482,11 +795,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function getFromStorage(key) {
     return localStorage.getItem(key);
   }
-  
+
   function setToStorage(key, value) {
     localStorage.setItem(key, value);
   }
-  
+
   function removeFromStorage(key) {
     localStorage.removeItem(key);
   }
@@ -529,24 +842,24 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       if (welcomeScreen) {
         welcomeScreen.style.display = 'flex';
-        
+
         // Personalizar mensagem se o nome do usuário for fornecido
         if (userName) {
           const welcomeTitle = welcomeScreen.querySelector('.welcome-title');
           const welcomeSubtitle = welcomeScreen.querySelector('.welcome-subtitle');
-          
+
           if (welcomeTitle) {
             welcomeTitle.innerHTML = `
               <span class="welcome-gradient">Bem-vindo ao</span>
               <span class="welcome-brand">Prisma</span>
             `;
           }
-          
+
           if (welcomeSubtitle) {
             welcomeSubtitle.textContent = `Olá, ${userName}! Sua gestão financeira inteligente começa aqui`;
           }
         }
-        
+
         refreshIcons();
       }
     } catch (error) {
@@ -680,7 +993,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (app) {
           app.style.display = 'block';
         }
-        
+
         // Carregar dados do perfil atual se existir
         if (currentProfileId) {
           loadProfileData(currentProfileId);
@@ -688,11 +1001,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!currentProfile && typeof getProfileById === 'function') {
               currentProfile = getProfileById(currentProfileId);
             }
-          } catch (_) {}
+          } catch (_) { }
         }
         if (typeof syncAuthenticatedUserUI === 'function') syncAuthenticatedUserUI();
         else setTimeout(() => { if (typeof syncAuthenticatedUserUI === 'function') syncAuthenticatedUserUI(); }, 0);
-        
+
         showToast('Bem-vindo ao Prisma.');
       } else {
         const app = document.getElementById('mainApp') || document.querySelector('.app');
@@ -793,7 +1106,7 @@ document.addEventListener('DOMContentLoaded', () => {
         hideAuthFeedback('loginFeedback');
         loginModal.style.display = 'flex';
         loginModal.classList.add('show');
-        
+
         const existingProfilesSection = document.getElementById('existingProfilesSection');
         const existingProfilesList = document.getElementById('existingProfilesList');
         if (existingProfilesSection) existingProfilesSection.style.display = 'none';
@@ -803,7 +1116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (existingProfilesSection) existingProfilesSection.style.display = 'none';
         if (existingProfilesList) existingProfilesList.innerHTML = '';
-        
+
         refreshIcons();
         setupPasswordToggleButtons();
         requestAnimationFrame(() => {
@@ -1019,14 +1332,14 @@ document.addEventListener('DOMContentLoaded', () => {
         registrationModal.style.display = 'flex';
         registrationModal.classList.add('show');
       }
-      
+
       const titleElement = document.getElementById('registrationTitle');
       const subtitleElement = document.getElementById('registrationSubtitle');
       if (titleElement) titleElement.textContent = 'Crie sua conta';
       if (subtitleElement) subtitleElement.textContent = 'Comece sua jornada financeira inteligente';
       if (existingProfilesSection) existingProfilesSection.style.display = 'none';
       if (existingProfilesList) existingProfilesList.innerHTML = '';
-      
+
       if (typeof refreshIcons === 'function') {
         refreshIcons();
       }
@@ -1056,20 +1369,20 @@ document.addEventListener('DOMContentLoaded', () => {
       registrationModal.style.display = 'none';
       registrationModal.classList.remove('show');
     }
-    
+
     // Resetar lista de perfis existentes
     if (existingProfilesList) {
       existingProfilesList.style.display = 'none';
       existingProfilesList.innerHTML = '';
     }
   }
-  
+
   // Renderizar perfis existentes no modal de cadastro
   function renderExistingProfiles(profiles) {
     if (!existingProfilesList) return;
-    
+
     existingProfilesList.innerHTML = '';
-    
+
     profiles.forEach(profile => {
       const profileItem = document.createElement('button');
       profileItem.type = 'button';
@@ -1080,36 +1393,36 @@ document.addEventListener('DOMContentLoaded', () => {
       profileItem.addEventListener('click', () => {
         showLoginPasswordPrompt(profile);
       });
-      
+
       existingProfilesList.appendChild(profileItem);
     });
-    
+
     refreshIcons();
   }
-  
+
   // Mostrar prompt para senha do perfil existente
   function showLoginPasswordPrompt(profile) {
     // Redirecionar para o modal de login com o email preenchido
     hideRegistrationModal();
     showLoginModal();
-    
+
     // Preencher o campo de email
     const loginEmailInput = document.getElementById('loginEmail');
     if (loginEmailInput) {
       loginEmailInput.value = profile.email;
     }
-    
+
     // Focar no campo de senha
     const loginPasswordInput = document.getElementById('loginPassword');
     if (loginPasswordInput) {
       loginPasswordInput.focus();
     }
   }
-  
+
   // Fazer login em perfil existente
   function loginToProfile(profile) {
     hideRegistrationModal(); showLoginModal();
-    const email=document.getElementById('loginEmail'); if(email) email.value=profile.email||'';
+    const email = document.getElementById('loginEmail'); if (email) email.value = profile.email || '';
     document.getElementById('loginPassword')?.focus();
   }
 
@@ -1122,7 +1435,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (registrationForm) {
     registrationForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      
+
       const name = document.getElementById('regName').value.trim();
       const email = document.getElementById('regEmail').value.trim();
       const password = document.getElementById('regPassword').value;
@@ -1146,7 +1459,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('regPassword').style.borderColor = '#ef4444';
         return;
       }
-      
+
       // Proteção contra duplo clique
       const submitBtn = registrationForm.querySelector('button[type="submit"]');
       if (submitBtn) {
@@ -1168,37 +1481,37 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-  
+
   // Clear error borders when user starts typing
   const regNameInput = document.getElementById('regName');
   const regEmailInput = document.getElementById('regEmail');
   const regPasswordInput = document.getElementById('regPassword');
   const regConfirmPasswordInput = document.getElementById('regConfirmPassword');
-  
+
   if (regNameInput) {
     regNameInput.addEventListener('input', () => {
       regNameInput.style.borderColor = '';
     });
   }
-  
+
   if (regEmailInput) {
     regEmailInput.addEventListener('input', () => {
       regEmailInput.style.borderColor = '';
     });
   }
-  
+
   if (regPasswordInput) {
     regPasswordInput.addEventListener('input', () => {
       regPasswordInput.style.borderColor = '';
     });
   }
-  
+
   if (regConfirmPasswordInput) {
     regConfirmPasswordInput.addEventListener('input', () => {
       regConfirmPasswordInput.style.borderColor = '';
     });
   }
-  
+
   // Firebase Auth owns credentials; the browser never stores passwords or password hashes.
   async function handleRegistrationProcess(name, email, password) {
     hideAuthFeedback('regFeedback');
@@ -1239,14 +1552,14 @@ document.addEventListener('DOMContentLoaded', () => {
       showAuthFeedback('regFeedback', authErrorMessage(error), 'error');
     }
   }
-  
+
   // Event listener para botão de mostrar perfis existentes
   if (showExistingProfilesBtn) {
     showExistingProfilesBtn.addEventListener('click', () => {
       if (existingProfilesList) {
         const isHidden = existingProfilesList.style.display === 'none';
         existingProfilesList.style.display = isHidden ? 'block' : 'none';
-        
+
         // Atualizar texto do botão
         if (showExistingProfilesBtn) {
           if (isHidden) {
@@ -1270,13 +1583,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  const resetPasswordModal=document.getElementById('resetPasswordModal');
-  const forgotPasswordBtn=document.getElementById('forgotPasswordBtn');
-  const forgotPasswordForm=document.getElementById('forgotPasswordForm');
-  const resetPasswordForm=document.getElementById('resetPasswordForm');
-  const backToLoginFromReset=document.getElementById('backToLoginFromReset');
-  function openResetRequest(){if(resetPasswordModal){resetPasswordModal.style.display='flex';resetPasswordModal.classList.add('show');}hideLoginModal();}
-  function closeReset(){if(resetPasswordModal){resetPasswordModal.style.display='none';resetPasswordModal.classList.remove('show');}}
+  const resetPasswordModal = document.getElementById('resetPasswordModal');
+  const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+  const forgotPasswordForm = document.getElementById('forgotPasswordForm');
+  const resetPasswordForm = document.getElementById('resetPasswordForm');
+  const backToLoginFromReset = document.getElementById('backToLoginFromReset');
+  function openResetRequest() { if (resetPasswordModal) { resetPasswordModal.style.display = 'flex'; resetPasswordModal.classList.add('show'); } hideLoginModal(); }
+  function closeReset() { if (resetPasswordModal) { resetPasswordModal.style.display = 'none'; resetPasswordModal.classList.remove('show'); } }
 
   async function handleGoogleAuth(feedbackId) {
     const buttons = [document.getElementById('loginWithGoogleBtn'), document.getElementById('registerWithGoogleBtn')];
@@ -1317,8 +1630,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  if(forgotPasswordBtn)forgotPasswordBtn.addEventListener('click',openResetRequest);
-  if(backToLoginFromReset)backToLoginFromReset.addEventListener('click',e=>{e.preventDefault();closeReset();showLoginModal();});
+  if (forgotPasswordBtn) forgotPasswordBtn.addEventListener('click', openResetRequest);
+  if (backToLoginFromReset) backToLoginFromReset.addEventListener('click', e => { e.preventDefault(); closeReset(); showLoginModal(); });
   if (forgotPasswordForm) forgotPasswordForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = document.getElementById('forgotEmail')?.value.trim().toLowerCase() || '';
@@ -1387,7 +1700,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (loginForm) {
     loginForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      
+
       const email = document.getElementById('loginEmail').value.trim();
       const password = document.getElementById('loginPassword').value;
 
@@ -1405,7 +1718,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function handleLoginProcess(email, password) {
     hideAuthFeedback('loginFeedback');
     const cleanEmail = (email || '').trim().toLowerCase();
-    
+
     if (!cleanEmail || !password) {
       showAuthFeedback('loginFeedback', 'Por favor, informe seu e-mail e senha.', 'error');
       return;
@@ -1415,7 +1728,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('loginEmail')?.focus();
       return;
     }
-    
+
     const submit = document.querySelector('#loginForm button[type=submit]');
     if (submit) {
       submit.disabled = true;
@@ -1444,13 +1757,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Clear error borders when user starts typing in login form
   const loginEmailInput = document.getElementById('loginEmail');
   const loginPasswordInput = document.getElementById('loginPassword');
-  
+
   if (loginEmailInput) {
     loginEmailInput.addEventListener('input', () => {
       loginEmailInput.style.borderColor = '';
     });
   }
-  
+
   if (loginPasswordInput) {
     loginPasswordInput.addEventListener('input', () => {
       loginPasswordInput.style.borderColor = '';
@@ -1474,7 +1787,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateMobileMenuIcon() {
     if (!mobileMenu || !sidebar) return;
-    const isOpen = (window.innerWidth >= 1024)
+    const isOpen = (!isMobileViewport())
       ? sidebar.classList.contains('collapsed')
       : (sidebar.classList.contains('open') || sidebar.classList.contains('active'));
 
@@ -1495,7 +1808,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (mobileMenu && sidebar) {
     mobileMenu.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (window.innerWidth >= 1024) {
+      if (!isMobileViewport()) {
         // Desktop: recolher / expandir sidebar
         sidebar.classList.toggle('collapsed');
       } else {
@@ -1532,8 +1845,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const SECTION_HASH_PREFIX = '#/tela/';
   const sectionHashFor = (screenId) => `${SECTION_HASH_PREFIX}${encodeURIComponent(screenId)}`;
 
-  window.navigateToSection = function(screenId, options = {}) {
+  window.navigateToSection = function (screenId, options = {}) {
     if (window.PrismaNavbar) window.PrismaNavbar.closeAll();
+    // Libera rolagem presa por modal/overlay (corrige telas em que não dá para rolar até o botão)
+    try {
+      document.body.classList.remove('prisma-scroll-locked', 'prisma-notif-open');
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.left = '';
+      document.body.style.right = '';
+      document.body.style.width = '';
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+      document.querySelectorAll('.content, .sidebar-nav').forEach((el) => {
+        el.style.overflowY = '';
+        el.style.overscrollBehaviorY = '';
+      });
+      const bd = document.getElementById('notificationsBackdrop');
+      if (bd) bd.hidden = true;
+    } catch (_) { }
     if (!isAuthenticated) {
       const app = document.getElementById('mainApp') || document.querySelector('.app');
       if (app) app.style.display = 'none';
@@ -1613,7 +1943,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof updateDashboardCards === 'function') updateDashboardCards();
       }
       if (screenId === 'centro-financeiro' && typeof runCentroSimulacao === 'function') {
-        setTimeout(() => { try { runCentroSimulacao(); } catch (_) {} }, 0);
+        setTimeout(() => { try { runCentroSimulacao(); } catch (_) { } }, 0);
       }
       if (screenId === 'investimentos' || screenId === 'carteira-ativos') {
         if (typeof renderInvestimentos === 'function') renderInvestimentos();
@@ -1631,7 +1961,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (screenId === 'cartoes' && typeof renderCartoes === 'function') renderCartoes();
       if (screenId === 'metas' && typeof renderGoals === 'function') renderGoals();
       if (screenId === 'configuracoes') {
-        setTimeout(() => { try { loadLgpdSettings(); } catch(_) {} }, 0);
+        setTimeout(() => { try { loadLgpdSettings(); } catch (_) { } }, 0);
       }
       if (screenId === 'prisma-ai' && typeof runPrismaAiAnalysis === 'function') {
         if (!window.__currentAiAnalysis) {
@@ -1733,10 +2063,12 @@ document.addEventListener('DOMContentLoaded', () => {
     cartoes = getJSONFromStorage(STORAGE_KEYS.cartoes, []);
     investimentos = getJSONFromStorage(STORAGE_KEYS.investimentos, []);
     goals = getJSONFromStorage(STORAGE_KEYS.goals, []);
-    
+
     // Carregar dados adicionais específicos do perfil
-    incomeData = getJSONFromStorage(STORAGE_KEYS.monthlyFlow, { inc: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], exp: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }).inc;
-    expenseData = getJSONFromStorage(STORAGE_KEYS.monthlyFlow, { inc: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], exp: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }).exp;
+    const __flowAligned = alignMonthlyFlow(getJSONFromStorage(STORAGE_KEYS.monthlyFlow, null));
+    incomeData = __flowAligned.inc;
+    expenseData = __flowAligned.exp;
+    months = getLast12Months().short;
     categories = getJSONFromStorage(STORAGE_KEYS.categories, []);
     summaryData = getJSONFromStorage(STORAGE_KEYS.summary, {
       saldoAtual: 0.00,
@@ -1748,7 +2080,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Executar limpeza inicial
   limparDadosIniciais();
-  
+
   // Função para carregar dados do perfil atual
   function loadProfileData(profileId) {
     // Atualizar chaves de storage para o perfil específico
@@ -1763,13 +2095,13 @@ document.addEventListener('DOMContentLoaded', () => {
         currentProfile = found;
         if (typeof persistAuthenticatedUser === 'function') persistAuthenticatedUser(found);
       }
-    } catch (_) {}
-    
+    } catch (_) { }
+
     // Recarregar dados com as novas chaves
     limparDadosIniciais();
     window.__currentAiHealthScore = getJSONFromStorage(getAiHealthScoreStorageKey(profileId), null);
     renderSavedFinancialHealthScore(window.__currentAiHealthScore);
-    
+
     // Atualizar interface com os dados do perfil
     recalculateAll();
     if (typeof syncAuthenticatedUserUI === 'function') syncAuthenticatedUserUI();
@@ -1786,7 +2118,7 @@ document.addEventListener('DOMContentLoaded', () => {
       [STORAGE_KEYS.investimentos, investimentos],
       [STORAGE_KEYS.goals, goals],
       [STORAGE_KEYS.summary, { saldoAtual, salarioMensal }],
-      [STORAGE_KEYS.monthlyFlow, { inc: incomeData, exp: expenseData }],
+      [STORAGE_KEYS.monthlyFlow, { inc: incomeData, exp: expenseData, keys: getLast12Months().keys }],
       [STORAGE_KEYS.categories, categories]
     ];
     let saved = true;
@@ -1800,30 +2132,30 @@ document.addEventListener('DOMContentLoaded', () => {
   // Função para determinar prioridade baseada na categoria
   function determinarPrioridadePorCategoria(categoria) {
     const categoriaLower = categoria.toLowerCase();
-    
+
     // Prioridade máxima (urgente)
-    if (categoriaLower.includes('moradia') || categoriaLower.includes('alimentação') || 
-        categoriaLower.includes('alimentacao') || categoriaLower.includes('saúde') || 
-        categoriaLower.includes('saude') || categoriaLower.includes('remédio') ||
-        categoriaLower.includes('remedio')) {
+    if (categoriaLower.includes('moradia') || categoriaLower.includes('alimentação') ||
+      categoriaLower.includes('alimentacao') || categoriaLower.includes('saúde') ||
+      categoriaLower.includes('saude') || categoriaLower.includes('remédio') ||
+      categoriaLower.includes('remedio')) {
       return 'urgente';
     }
-    
+
     // Prioridade alta
     if (categoriaLower.includes('educação') || categoriaLower.includes('educacao') ||
-        categoriaLower.includes('transporte') || categoriaLower.includes('combustível') ||
-        categoriaLower.includes('combustivel') || categoriaLower.includes('escola')) {
+      categoriaLower.includes('transporte') || categoriaLower.includes('combustível') ||
+      categoriaLower.includes('combustivel') || categoriaLower.includes('escola')) {
       return 'alta';
     }
-    
+
     // Prioridade média
     if (categoriaLower.includes('conta') || categoriaLower.includes('telefone') ||
-        categoriaLower.includes('internet') || categoriaLower.includes('energia') ||
-        categoriaLower.includes('água') || categoriaLower.includes('agua') ||
-        categoriaLower.includes('telecomunicação') || categoriaLower.includes('telecomunicacao')) {
+      categoriaLower.includes('internet') || categoriaLower.includes('energia') ||
+      categoriaLower.includes('água') || categoriaLower.includes('agua') ||
+      categoriaLower.includes('telecomunicação') || categoriaLower.includes('telecomunicacao')) {
       return 'media';
     }
-    
+
     // Prioridade baixa (padrão)
     return 'baixa';
   }
@@ -1940,78 +2272,78 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // URL da API centralizada: window.PRISMA_API_URL (gerada no build a partir de PRISMA_API_URL).
   // Vazio = mesmo domínio; na Vercel, /api/* é encaminhado ao backend Render por api/_proxy.js.
-  function getApiBaseUrl(){
-    const configured=String(window.PRISMA_API_URL||'').trim().replace(/\/$/,'');
-    if(configured) return configured;
-    if(location.protocol==='file:') return 'http://localhost:3000';
+  function getApiBaseUrl() {
+    const configured = String(window.PRISMA_API_URL || '').trim().replace(/\/$/, '');
+    if (configured) return configured;
+    if (location.protocol === 'file:') return 'http://localhost:3000';
     return '';
   }
   const API_TIMEOUT_MS = 20000;
-  async function getApiAuthHeaders(){
-    try{
-      const fb=window.PrismaFirebase;
-      if(fb && typeof fb.getIdToken==='function'){
-        const token=await fb.getIdToken();
-        if(token) return { Authorization:'Bearer '+token };
+  async function getApiAuthHeaders() {
+    try {
+      const fb = window.PrismaFirebase;
+      if (fb && typeof fb.getIdToken === 'function') {
+        const token = await fb.getIdToken();
+        if (token) return { Authorization:'Bearer ' + token };
       }
-    }catch(_){}
+    } catch (_) { }
     return {};
   }
-  function apiHttpMessage(status){
-    if(status===401) return 'Sua sessão expirou ou é inválida. Entre novamente.';
-    if(status===403) return 'Você não tem permissão para esta ação.';
-    if(status===404) return 'Recurso não encontrado.';
-    if(status===413) return 'Os dados enviados são grandes demais.';
-    if(status===429) return 'Muitas tentativas. Aguarde um instante e tente de novo.';
-    if(status>=500) return 'Servidor temporariamente indisponível. Tente novamente em instantes.';
-    return 'Erro HTTP '+status;
+  function apiHttpMessage(status) {
+    if (status === 401) return 'Sua sessão expirou ou é inválida. Entre novamente.';
+    if (status === 403) return 'Você não tem permissão para esta ação.';
+    if (status === 404) return 'Recurso não encontrado.';
+    if (status === 413) return 'Os dados enviados são grandes demais.';
+    if (status === 429) return 'Muitas tentativas. Aguarde um instante e tente de novo.';
+    if (status >= 500) return 'Servidor temporariamente indisponível. Tente novamente em instantes.';
+    return 'Erro HTTP ' + status;
   }
   async function apiFetch(url, options = {}) {
-    const method=String(options.method||'GET').toUpperCase();
-    const { headers:extraHeaders, ...rest } = options;
-    const authHeaders=await getApiAuthHeaders();
-    const attempt=async()=>{
-      const ctrl=new AbortController();
-      const timer=setTimeout(()=>ctrl.abort(),API_TIMEOUT_MS);
-      try{
-        return await fetch(`${getApiBaseUrl()}${url}`,{
-          credentials:'include',
+    const method = String(options.method || 'GET').toUpperCase();
+    const { headers: extraHeaders, ...rest } = options;
+    const authHeaders = await getApiAuthHeaders();
+    const attempt = async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+      try {
+        return await fetch(`${getApiBaseUrl()}${url}`, {
+          credentials: 'include',
           ...rest,
-          headers:{'Content-Type':'application/json',...authHeaders,...(extraHeaders||{})},
-          signal:ctrl.signal
+          headers: { 'Content-Type': 'application/json', ...authHeaders, ...(extraHeaders || {}) },
+          signal: ctrl.signal
         });
       } finally { clearTimeout(timer); }
     };
     let response;
     try {
-      try { response=await attempt(); }
-      catch(first){ if(method!=='GET') throw first; response=await attempt(); }
-    } catch(networkError) {
-      const e=new Error(networkError&&networkError.name==='AbortError'
+      try { response = await attempt(); }
+      catch (first) { if (method !== 'GET') throw first; response = await attempt(); }
+    } catch (networkError) {
+      const e = new Error(networkError && networkError.name === 'AbortError'
         ? 'O servidor demorou demais para responder. Tente novamente.'
         : 'Não foi possível conectar ao servidor Prisma. Verifique sua conexão e tente novamente.');
-      e.code=networkError&&networkError.name==='AbortError'?'TIMEOUT':'NETWORK_ERROR';
-      e.cause=networkError; throw e;
+      e.code = networkError && networkError.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_ERROR';
+      e.cause = networkError; throw e;
     }
-    let payload={}; let parsed=true;
-    try { payload=await response.json(); } catch(_) { parsed=false; }
-    if(!response.ok){
+    let payload = {}; let parsed = true;
+    try { payload = await response.json(); } catch (_) { parsed = false; }
+    if (!response.ok) {
       if (response.status === 401 && !url.startsWith('/api/auth/')) {
         handleSessionExpired();
       }
-      const e=new Error((parsed&&payload&&payload.error)||apiHttpMessage(response.status));
-      e.status=response.status;
+      const e = new Error((parsed && payload && payload.error) || apiHttpMessage(response.status));
+      e.status = response.status;
       throw e;
     }
-    if(!parsed){ const e=new Error('Resposta inválida do servidor.'); e.status=response.status; throw e; }
+    if (!parsed) { const e = new Error('Resposta inválida do servidor.'); e.status = response.status; throw e; }
     return payload;
   }
-  function collectServerState(){
-    let notifications=[]; try { const r=localStorage.getItem('prisma_notifications_v2'); notifications=r?((JSON.parse(r).notifications)||[]):[]; } catch(_) {}
-    let education={completed:[],points:0,challengeDone:false}; try { education=JSON.parse(localStorage.getItem(getEducationStorageKey())||'{}'); } catch(_) {}
+  function collectServerState() {
+    let notifications = []; try { const r = localStorage.getItem('prisma_notifications_v2'); notifications = r ? ((JSON.parse(r).notifications) || []) : []; } catch (_) { }
+    let education = { completed: [], points: 0, challengeDone: false }; try { education = JSON.parse(localStorage.getItem(getEducationStorageKey()) || '{}'); } catch (_) { }
     education.progress = getJSONFromStorage(getScopedStorageKey('prisma_trilha_progresso_v1'), {});
-    let prismaAiPlan=[]; try { prismaAiPlan=JSON.parse(localStorage.getItem(getScopedStorageKey('prisma_ai_savings_plan'))||'[]'); } catch(_) {}
-    let healthScore=null; try { healthScore=JSON.parse(localStorage.getItem(getAiHealthScoreStorageKey())||'null'); } catch(_) {}
+    let prismaAiPlan = []; try { prismaAiPlan = JSON.parse(localStorage.getItem(getScopedStorageKey('prisma_ai_savings_plan')) || '[]'); } catch (_) { }
+    let healthScore = null; try { healthScore = JSON.parse(localStorage.getItem(getAiHealthScoreStorageKey()) || 'null'); } catch (_) { }
     const settings = {
       categoryBudgets: getJSONFromStorage(getScopedStorageKey('prisma_category_budgets_v1'), {}),
       alertsMeta: getJSONFromStorage(getScopedStorageKey('prisma_alerts_meta_v1'), {}),
@@ -2030,99 +2362,100 @@ document.addEventListener('DOMContentLoaded', () => {
     } : {};
     return {
       profile,
-      receitas:Array.isArray(receitas)?receitas:[],
-      despesas:Array.isArray(despesas)?despesas:[],
-      contas:Array.isArray(contas)?contas:[],
-      cartoes:Array.isArray(cartoes)?cartoes:[],
-      investimentos:Array.isArray(investimentos)?investimentos:[],
-      goals:Array.isArray(goals)?goals:[],
-      categories:Array.isArray(categories)?categories:[],
-      summary:summaryData||{saldoAtual:saldoAtual||0,salarioMensal:salarioMensal||0},
-      monthlyFlow:{inc:incomeData||Array(12).fill(0),exp:expenseData||Array(12).fill(0)},
-      education:{completed:education.completed||[],points:education.points||0,challengeDone:!!education.challengeDone,progress:education.progress||{}},
+      receitas: Array.isArray(receitas) ? receitas : [],
+      despesas: Array.isArray(despesas) ? despesas : [],
+      contas: Array.isArray(contas) ? contas : [],
+      cartoes: Array.isArray(cartoes) ? cartoes : [],
+      investimentos: Array.isArray(investimentos) ? investimentos : [],
+      goals: Array.isArray(goals) ? goals : [],
+      categories: Array.isArray(categories) ? categories : [],
+      summary: summaryData || { saldoAtual: saldoAtual || 0, salarioMensal: salarioMensal || 0 },
+      monthlyFlow: { inc: incomeData || Array(12).fill(0), exp: expenseData || Array(12).fill(0) },
+      education: { completed: education.completed || [], points: education.points || 0, challengeDone: !!education.challengeDone, progress: education.progress || {} },
       settings,
       notifications,
-      prismaAi:{analysis:window.__currentAiAnalysis||null,recommendations:window.__currentAiRecommendations||[],savingsPlan:prismaAiPlan,healthScore,history:[]}
+      prismaAi: { analysis: window.__currentAiAnalysis || null, recommendations: window.__currentAiRecommendations || [], savingsPlan: prismaAiPlan, healthScore, history: [] }
     };
   }
-  function hasFinancialData(state){return ['receitas','despesas','contas','cartoes','investimentos','goals'].some(k=>Array.isArray(state?.[k])&&state[k].length>0)}
-  function profileFromServerUser(user){return {id:user.id,name:user.name,email:user.email,type:'fisica',doc:'',saldo:0,salario:0,despesas:0,createdAt:user.createdAt}}
-  function updateRoleUI(user){
-    currentServerUser=user||null;
-    const adminNav=document.getElementById('adminNavItem');
-    if(adminNav) adminNav.style.display=user?.role==='ADMIN'?'flex':'none';
-    const adminSection=document.getElementById('admin');
-    if(user?.role!=='ADMIN' && adminSection){adminSection.classList.remove('active');adminSection.style.display='none';}
-    if(user?.role==='ADMIN' && adminSection){adminSection.style.display='';}
+  function hasFinancialData(state) { return ['receitas', 'despesas', 'contas', 'cartoes', 'investimentos', 'goals'].some(k => Array.isArray(state?.[k]) && state[k].length > 0) }
+  function profileFromServerUser(user) { return { id: user.id, name: user.name, email: user.email, type: 'fisica', doc: '', saldo: 0, salario: 0, despesas: 0, createdAt: user.createdAt } }
+  function updateRoleUI(user) {
+    currentServerUser = user || null;
+    const adminNav = document.getElementById('adminNavItem');
+    if (adminNav) adminNav.style.display = user?.role === 'ADMIN' ? 'flex' : 'none';
+    const adminSection = document.getElementById('admin');
+    if (user?.role !== 'ADMIN' && adminSection) { adminSection.classList.remove('active'); adminSection.style.display = 'none'; }
+    if (user?.role === 'ADMIN' && adminSection) { adminSection.style.display = ''; }
   }
-  async function loadAdminUsers(){
-    if(currentServerUser?.role!=='ADMIN') return;
-    const tbody=document.querySelector('#adminUsersTable tbody'); if(!tbody)return;
-    try{const data=await apiFetch('/api/admin/users');tbody.innerHTML='';data.users.forEach(u=>{const tr=document.createElement('tr');const role=u.role==='ADMIN'?'ADMIN':'USER';const status=u.status==='active'?'ATIVO':'SUSPENSO';tr.innerHTML=`<td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td><td><strong>${role}</strong></td><td>${status}</td><td>${u.last_login_at?new Date(u.last_login_at).toLocaleString('pt-BR'):'Nunca'}</td><td><button class="admin-action" data-action="role" data-id="${u.id}" data-role="${role==='ADMIN'?'USER':'ADMIN'}">${role==='ADMIN'?'Tornar USER':'Tornar ADMIN'}</button><button class="admin-action" data-action="status" data-id="${u.id}" data-status="${status==='ATIVO'?'blocked':'active'}">${status==='ATIVO'?'Suspender':'Reativar'}</button></td>`;tbody.appendChild(tr)});}catch(e){showToast(e.status===403?'Acesso administrativo negado.':'Não foi possível carregar os usuários.')}
+  async function loadAdminUsers() {
+    if (currentServerUser?.role !== 'ADMIN') return;
+    const tbody = document.querySelector('#adminUsersTable tbody'); if (!tbody) return;
+    try { const data = await apiFetch('/api/admin/users'); tbody.innerHTML = ''; data.users.forEach(u => { const tr = document.createElement('tr'); const role = u.role === 'ADMIN' ? 'ADMIN' : 'USER'; const status = u.status === 'active' ? 'ATIVO' : 'SUSPENSO'; tr.innerHTML = `<td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td><td><strong>${role}</strong></td><td>${status}</td><td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString('pt-BR') : 'Nunca'}</td><td><button class="admin-action" data-action="role" data-id="${u.id}" data-role="${role === 'ADMIN' ? 'USER' : 'ADMIN'}">${role === 'ADMIN' ? 'Tornar USER' : 'Tornar ADMIN'}</button><button class="admin-action" data-action="status" data-id="${u.id}" data-status="${status === 'ATIVO' ? 'blocked' : 'active'}">${status === 'ATIVO' ? 'Suspender' : 'Reativar'}</button></td>`; tbody.appendChild(tr) }); } catch (e) { showToast(e.status === 403 ? 'Acesso administrativo negado.' : 'Não foi possível carregar os usuários.') }
   }
-  function escapeHtml(value){return String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
-  document.addEventListener('click',async(e)=>{const b=e.target.closest('.admin-action');if(!b)return;if(b.dataset.action==='role'){if(!confirm(`Alterar a permissão deste usuário para ${b.dataset.role}?`))return;try{await apiFetch(`/api/admin/users/${encodeURIComponent(b.dataset.id)}/role`,{method:'PUT',body:JSON.stringify({role:b.dataset.role})});showToast('Permissão atualizada.');loadAdminUsers()}catch(err){showToast(err.message||'Não foi possível alterar a permissão.')}}else{if(!confirm(b.dataset.status==='blocked'?'Suspender este usuário?':'Reativar este usuário?'))return;try{await apiFetch(`/api/admin/users/${encodeURIComponent(b.dataset.id)}/status`,{method:'PUT',body:JSON.stringify({status:b.dataset.status})});showToast('Status atualizado.');loadAdminUsers()}catch(err){showToast(err.message||'Não foi possível alterar o status.')}}});
-  const adminNavItem=document.getElementById('adminNavItem'); if(adminNavItem)adminNavItem.addEventListener('click',()=>setTimeout(loadAdminUsers,50));
-  const addAdminBtn=document.getElementById('addAdminBtn');
-  if(addAdminBtn) addAdminBtn.addEventListener('click',async()=>{
-    if(currentServerUser?.role!=='ADMIN') return;
-    const email=window.prompt('Digite o e-mail de um usuário existente que deverá se tornar administrador:');
-    if(email===null)return;
-    const normalized=email.trim().toLowerCase();
-    if(!normalized)return showToast('Informe um e-mail.');
-    if(!confirm(`Tornar ${normalized} administrador?\n\nO usuário passará a ter acesso às funções administrativas do Prisma.`))return;
-    addAdminBtn.disabled=true;
-    try{await apiFetch('/api/admin/admins',{method:'POST',body:JSON.stringify({email:normalized})});showToast('Administrador adicionado com sucesso.');await loadAdminUsers();}
-    catch(err){showToast(err.message||'Não foi possível adicionar o administrador.');}
-    finally{addAdminBtn.disabled=false;}
+  function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
+  document.addEventListener('click', async (e) => { const b = e.target.closest('.admin-action'); if (!b) return; if (b.dataset.action === 'role') { if (!confirm(`Alterar a permissão deste usuário para ${b.dataset.role}?`)) return; try { await apiFetch(`/api/admin/users/${encodeURIComponent(b.dataset.id)}/role`, { method: 'PUT', body: JSON.stringify({ role: b.dataset.role }) }); showToast('Permissão atualizada.'); loadAdminUsers() } catch (err) { showToast(err.message || 'Não foi possível alterar a permissão.') } } else { if (!confirm(b.dataset.status === 'blocked' ? 'Suspender este usuário?' : 'Reativar este usuário?')) return; try { await apiFetch(`/api/admin/users/${encodeURIComponent(b.dataset.id)}/status`, { method: 'PUT', body: JSON.stringify({ status: b.dataset.status }) }); showToast('Status atualizado.'); loadAdminUsers() } catch (err) { showToast(err.message || 'Não foi possível alterar o status.') } } });
+  const adminNavItem = document.getElementById('adminNavItem'); if (adminNavItem) adminNavItem.addEventListener('click', () => setTimeout(loadAdminUsers, 50));
+  const addAdminBtn = document.getElementById('addAdminBtn');
+  if (addAdminBtn) addAdminBtn.addEventListener('click', async () => {
+    if (currentServerUser?.role !== 'ADMIN') return;
+    const email = window.prompt('Digite o e-mail de um usuário existente que deverá se tornar administrador:');
+    if (email === null) return;
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) return showToast('Informe um e-mail.');
+    if (!confirm(`Tornar ${normalized} administrador?\n\nO usuário passará a ter acesso às funções administrativas do Prisma.`)) return;
+    addAdminBtn.disabled = true;
+    try { await apiFetch('/api/admin/admins', { method: 'POST', body: JSON.stringify({ email: normalized }) }); showToast('Administrador adicionado com sucesso.'); await loadAdminUsers(); }
+    catch (err) { showToast(err.message || 'Não foi possível adicionar o administrador.'); }
+    finally { addAdminBtn.disabled = false; }
   });
 
-  function applyServerState(state,user){
-    firebaseApplyingState=true;
+  function applyServerState(state, user) {
+    firebaseApplyingState = true;
     try {
-      isAuthenticated=true;
-      firebaseAuthenticated=true;
-      serverAuthenticated=false;
-      currentLocalUser=user;
+      isAuthenticated = true;
+      firebaseAuthenticated = true;
+      serverAuthenticated = false;
+      currentLocalUser = user;
       hideWelcomeScreen();
       updateRoleUI(user);
-      if(user&&typeof persistAuthenticatedUser==='function')persistAuthenticatedUser(user);
-      const profile={...profileFromServerUser(user), ...(state.profile && typeof state.profile === 'object' ? state.profile : {})};
-      profile.id=user.id; profile.email=user.email; profile.name=user.name || profile.name;
-      profiles=[profile]; currentProfileId=user.id; currentProfile=profile;
-      setToStorage(BASE_STORAGE_KEYS.currentProfileId,user.id);
-      STORAGE_KEYS=getProfileStorageKeys(user.id);
-      const put=(k,v)=>setJSONToStorage(k,v);
-      put(STORAGE_KEYS.receitas,state.receitas||[]);
-      put(STORAGE_KEYS.despesas,state.despesas||[]);
-      put(STORAGE_KEYS.contas,state.contas||[]);
-      put(STORAGE_KEYS.cartoes,state.cartoes||[]);
-      put(STORAGE_KEYS.investimentos,state.investimentos||[]);
-      put(STORAGE_KEYS.goals,state.goals||[]);
-      put(STORAGE_KEYS.categories,state.categories||[]);
-      put(STORAGE_KEYS.summary,state.summary||{saldoAtual:0,salarioMensal:0});
-      put(STORAGE_KEYS.monthlyFlow,state.monthlyFlow||{inc:Array(12).fill(0),exp:Array(12).fill(0)});
-      put(getEducationStorageKey(),state.education||{completed:[],points:0,challengeDone:false});
-      put(getScopedStorageKey('prisma_trilha_progresso_v1'),state.education?.progress||{});
-      put(getScopedStorageKey('prisma_category_budgets_v1'),state.settings?.categoryBudgets||{});
-      put(getScopedStorageKey('prisma_alerts_meta_v1'),state.settings?.alertsMeta||{});
-      put(getScopedStorageKey('prisma_transferencias'),state.settings?.transfers||[]);
-      try{localStorage.setItem('prisma_notifications_v2',JSON.stringify({notifications:state.notifications||[]}))}catch(_){}
-      window.__currentAiAnalysis=state.prismaAi?.analysis||null;
-      window.__currentAiRecommendations=Array.isArray(state.prismaAi?.recommendations)?state.prismaAi.recommendations:[];
-      window.__currentAiHealthScore=state.prismaAi?.healthScore||getJSONFromStorage(getAiHealthScoreStorageKey(),null);
-      if(window.__currentAiHealthScore){setJSONToStorage(getAiHealthScoreStorageKey(),window.__currentAiHealthScore);}
+      if (user && typeof persistAuthenticatedUser === 'function') persistAuthenticatedUser(user);
+      const profile = { ...profileFromServerUser(user), ...(state.profile && typeof state.profile === 'object' ? state.profile : {}) };
+      profile.id = user.id; profile.email = user.email; profile.name = user.name || profile.name;
+      profiles = [profile]; currentProfileId = user.id; currentProfile = profile;
+      setToStorage(BASE_STORAGE_KEYS.currentProfileId, user.id);
+      STORAGE_KEYS = getProfileStorageKeys(user.id);
+      const put = (k, v) => setJSONToStorage(k, v);
+      put(STORAGE_KEYS.receitas, state.receitas || []);
+      put(STORAGE_KEYS.despesas, state.despesas || []);
+      put(STORAGE_KEYS.contas, state.contas || []);
+      put(STORAGE_KEYS.cartoes, state.cartoes || []);
+      put(STORAGE_KEYS.investimentos, state.investimentos || []);
+      put(STORAGE_KEYS.goals, state.goals || []);
+      put(STORAGE_KEYS.categories, state.categories || []);
+      put(STORAGE_KEYS.summary, state.summary || { saldoAtual: 0, salarioMensal: 0 });
+      put(STORAGE_KEYS.monthlyFlow, state.monthlyFlow || { inc: Array(12).fill(0), exp: Array(12).fill(0) });
+      put(getEducationStorageKey(), state.education || { completed: [], points: 0, challengeDone: false });
+      put(getScopedStorageKey('prisma_trilha_progresso_v1'), state.education?.progress || {});
+      put(getScopedStorageKey('prisma_category_budgets_v1'), state.settings?.categoryBudgets || {});
+      put(getScopedStorageKey('prisma_alerts_meta_v1'), state.settings?.alertsMeta || {});
+      put(getScopedStorageKey('prisma_transferencias'), state.settings?.transfers || []);
+      try { localStorage.setItem('prisma_notifications_v2', JSON.stringify({ notifications: state.notifications || [] })) } catch (_) { }
+      window.__currentAiAnalysis = state.prismaAi?.analysis || null;
+      window.__currentAiRecommendations = Array.isArray(state.prismaAi?.recommendations) ? state.prismaAi.recommendations : [];
+      window.__currentAiHealthScore = state.prismaAi?.healthScore || getJSONFromStorage(getAiHealthScoreStorageKey(), null);
+      if (window.__currentAiHealthScore) { setJSONToStorage(getAiHealthScoreStorageKey(), window.__currentAiHealthScore); }
       renderSavedFinancialHealthScore(window.__currentAiHealthScore);
-      if(state.prismaAi&&state.prismaAi.savingsPlan) {
-        put(getScopedStorageKey('prisma_ai_savings_plan'),state.prismaAi.savingsPlan);
+      if (state.prismaAi && state.prismaAi.savingsPlan) {
+        put(getScopedStorageKey('prisma_ai_savings_plan'), state.prismaAi.savingsPlan);
       }
       loadProfileData(user.id);
-      profiles=[profile]; currentProfileId=user.id; currentProfile=profile; renderProfiles(); renderCurrentProfile();
-      if(typeof syncAuthenticatedUserUI==='function')syncAuthenticatedUserUI();
+      profiles = [profile]; currentProfileId = user.id; currentProfile = profile; renderProfiles(); renderCurrentProfile();
+      if (typeof syncAuthenticatedUserUI === 'function') syncAuthenticatedUserUI();
     } finally {
-      firebaseApplyingState=false;
+      firebaseApplyingState = false;
     }
   }
+
   function defaultFirebaseState() {
     return {
       profile: {}, receitas: [], despesas: [], contas: [], cartoes: [], investimentos: [],
@@ -2307,10 +2640,10 @@ document.addEventListener('DOMContentLoaded', () => {
     Object.values(STORAGE_KEYS).forEach(key => {
       localStorage.removeItem(key);
     });
-    
+
     // Limpar dados globais
     localStorage.removeItem(getScopedStorageKey('prisma_recomendacoes_aplicadas'));
-    
+
     // Recarregar dados vazios
     receitas = [];
     despesas = [];
@@ -2326,7 +2659,7 @@ document.addEventListener('DOMContentLoaded', () => {
     receitasMes = 0;
     despesasMes = 0;
     economiaMes = 0;
-    
+
     // Atualizar interface
     recalculateAll();
     showToast('Todos os dados foram limpos com sucesso.');
@@ -2349,11 +2682,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = firebaseAuthenticated
         ? { hasConsent: Boolean(firebaseConsent), consent: firebaseConsent }
         : currentLocalUser
-        ? (() => {
+          ? (() => {
             const consent = readLocalConsent(currentLocalUser.id);
             return { hasConsent: Boolean(consent), consent };
           })()
-        : await apiFetch('/api/lgpd/consent');
+          : await apiFetch('/api/lgpd/consent');
       const lgpdStatusBadge = document.getElementById('lgpdStatusBadge');
       const lgpdComm = document.getElementById('lgpdSettingsCommunications');
       const lgpdAnal = document.getElementById('lgpdSettingsAnalytics');
@@ -2430,8 +2763,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = firebaseAuthenticated
           ? { history: firebaseConsent ? [firebaseConsent] : [] }
           : currentLocalUser
-          ? { history: readLocalConsent(currentLocalUser.id) ? [readLocalConsent(currentLocalUser.id)] : [] }
-          : await apiFetch('/api/lgpd/history');
+            ? { history: readLocalConsent(currentLocalUser.id) ? [readLocalConsent(currentLocalUser.id)] : [] }
+            : await apiFetch('/api/lgpd/history');
         if (!data.history || data.history.length === 0) {
           showToast('Nenhum histórico de consentimento encontrado.');
           return;
@@ -2447,39 +2780,79 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function getLast12Months(now = new Date()){
-    const labels=[]; const keys=[];
-    for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); keys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); labels.push(monthNames[d.getMonth()]); }
-    return {labels,keys};
+  function getLast12Months() {
+    const now = new Date();
+    const labels = [];
+    const keys = [];
+    const short = [];
+    // Sempre 12 meses em ordem cronológica: mais antigo -> mês corrente
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      labels.push(monthNames[d.getMonth()]);
+      short.push(`${monthNames[d.getMonth()].slice(0, 3)}/${String(d.getFullYear()).slice(-2)}`);
+    }
+    return { labels, keys, short };
   }
-  function getMonthlyReportSeries(now = new Date()) {
-    const year = now.getFullYear();
-    const monthIndexes = new Map(getLast12Months(now).keys.map((key, index) => [key, index]));
-    const yearKeys = monthNames.map((_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
-    const valuesForYear = (values) => yearKeys.map((key) => {
-      const index = monthIndexes.get(key);
-      return index === undefined ? 0 : values[index] || 0;
+  // Realinha o fluxo mensal salvo à janela atual (sempre 12 meses, ordem cronológica terminando no mês corrente).
+  function alignMonthlyFlow(stored) {
+    const { keys } = getLast12Months();
+    const inc = Array(12).fill(0);
+    const exp = Array(12).fill(0);
+    if (!stored || typeof stored !== 'object') return { inc, exp, keys };
+    const sInc = Array.isArray(stored.inc) ? stored.inc : [];
+    const sExp = Array.isArray(stored.exp) ? stored.exp : [];
+    if (Array.isArray(stored.keys) && stored.keys.length > 0) {
+      // Mapeia por chave AAAA-MM — preserva apenas os meses que ainda estão na janela atual
+      stored.keys.forEach((k, i) => {
+        const j = keys.indexOf(k);
+        if (j >= 0) {
+          inc[j] = Number(sInc[i]) || 0;
+          exp[j] = Number(sExp[i]) || 0;
+        }
+      });
+    } else {
+      // Formato antigo (sem chaves): assume que o array termina no mês corrente e preenche de trás para frente
+      const n = Math.min(12, Math.max(sInc.length, sExp.length));
+      for (let i = 0; i < n; i++) {
+        const srcIdx = Math.max(sInc.length, sExp.length) - 1 - i;
+        const dstIdx = 11 - i;
+        if (srcIdx >= 0 && dstIdx >= 0) {
+          inc[dstIdx] = Number(sInc[srcIdx]) || 0;
+          exp[dstIdx] = Number(sExp[srcIdx]) || 0;
+        }
+      }
+    }
+    return { inc, exp, keys };
+  }
+  function getTransactionMonthKey(value) {
+    if (!value) return null; const d = new Date(String(value).includes('T') ? value : `${value}T00:00:00`); if (Number.isNaN(d.getTime())) return null;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  function rebuildCashflowFromTransactions() {
+    const { keys, short } = getLast12Months();
+    const inc = Array(12).fill(0);
+    const exp = Array(12).fill(0);
+    const index = new Map(keys.map((k, i) => [k, i]));
+    receitas.forEach(r => {
+      const i = index.get(getTransactionMonthKey(r.data));
+      if (i !== undefined) inc[i] += parseMoneyInput(r.valor);
     });
-
-    return {
-      labels: monthNames.map((month) => `${month.slice(0, 3)}/${String(year).slice(-2)}`),
-      income: valuesForYear(incomeData),
-      expenses: valuesForYear(expenseData)
-    };
+    despesas.forEach(d => {
+      const i = index.get(getTransactionMonthKey(d.data));
+      if (i !== undefined) exp[i] += parseMoneyInput(d.valor);
+    });
+    const hasTransactions = receitas.some(r => getTransactionMonthKey(r.data)) || despesas.some(d => getTransactionMonthKey(d.data));
+    if (hasTransactions) {
+      incomeData = inc;
+      expenseData = exp;
+      months = short; // garante sequência completa e ordenada
+      saveDataStorage(STORAGE_KEYS.monthlyFlow, { inc, exp, keys });
+    }
+    return { inc: incomeData, exp: expenseData, hasTransactions };
   }
-  function getTransactionMonthKey(value){
-    if(!value) return null; const d=new Date(String(value).includes('T')?value:`${value}T00:00:00`); if(Number.isNaN(d.getTime())) return null;
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-  }
-  function rebuildCashflowFromTransactions(){
-    const {keys}=getLast12Months(); const inc=Array(12).fill(0), exp=Array(12).fill(0); const index=new Map(keys.map((k,i)=>[k,i]));
-    receitas.forEach(r=>{const i=index.get(getTransactionMonthKey(r.data)); if(i!==undefined) inc[i]+=parseMoneyInput(r.valor);});
-    despesas.forEach(d=>{const i=index.get(getTransactionMonthKey(d.data)); if(i!==undefined) exp[i]+=parseMoneyInput(d.valor);});
-    const hasTransactions=receitas.some(r=>getTransactionMonthKey(r.data)) || despesas.some(d=>getTransactionMonthKey(d.data));
-    if(hasTransactions){ incomeData=inc; expenseData=exp; saveDataStorage(STORAGE_KEYS.monthlyFlow,{inc,exp}); }
-    return {inc:incomeData,exp:expenseData,hasTransactions};
-  }
-  months = getLast12Months().labels;  // Update global months variable
+  // Sempre sincroniza labels com a janela de 12 meses (ordem cronológica)
+  months = getLast12Months().short;
 
   // Inicializar renderização ao carregar
   setTimeout(() => {
@@ -2565,7 +2938,7 @@ document.addEventListener('DOMContentLoaded', () => {
     despesas.forEach((despesa, index) => {
       const tr = document.createElement('tr');
       const statusLabel = despesa.status === 'paid' ? 'Pago' : 'Pendente';
-      
+
       // Define a cor e ícone baseado na prioridade
       const prioridadeConfig = {
         'baixa': { class: 'prioridade-baixa', label: 'Baixa', icon: 'arrow-down' },
@@ -2574,7 +2947,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'urgente': { class: 'prioridade-urgente', label: 'Urgente', icon: 'alert-triangle' }
       };
       const prioridade = prioridadeConfig[despesa.prioridade] || prioridadeConfig['media'];
-      
+
       tr.innerHTML = `
         <td><span class="cat-badge food">${escapeHtml(despesa.categoria || '')}</span></td>
         <td>${escapeHtml(despesa.descricao || '')}</td>
@@ -2648,7 +3021,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof PrismaBankSync !== 'undefined' && PrismaBankSync.service && PrismaBankSync.service.isConnected) {
           return PrismaBankSync.service.isConnected(c);
         }
-      } catch (_) {}
+      } catch (_) { }
       return !!(c && c.source === 'openfinance' && c.syncStatus === 'connected');
     };
     const connected = (contas || []).filter(isConn);
@@ -2679,7 +3052,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const banco = cartao.banco || 'nubank';
       card.className = `card credit-card ${estiloClass}`;
       card.setAttribute('data-banco', banco);
-      
+
       // Define o nome do plano baseado no estilo
       const planos = {
         'default': 'Standard',
@@ -2690,7 +3063,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'titanium': 'Titanium'
       };
       const planoNome = planos[estilo] || 'Standard';
-      
+
       // Define o nome do banco
       const bancos = {
         'nubank': 'Nubank',
@@ -2730,35 +3103,72 @@ document.addEventListener('DOMContentLoaded', () => {
       const utilizacaoPct = limiteTotal > 0 ? Math.min(100, Math.round((faturaAtual / limiteTotal) * 100)) : null;
       const utilizacaoClass = utilizacaoPct !== null ? (utilizacaoPct > 80 ? 'danger' : utilizacaoPct > 50 ? 'warning' : 'safe') : '';
 
+      const last4 = escapeHtml(String(cartao.numero || '••••').slice(-4));
+      const titular = escapeHtml(String(cartao.titular || 'TITULAR').toUpperCase());
+      const validade = escapeHtml(String(cartao.validade || '••/••'));
+      const vencHtml = cartao.diaVencimento
+        ? `<span class="cc-meta-pill"><i data-lucide="calendar"></i> Vence dia ${escapeHtml(String(cartao.diaVencimento))}</span>`
+        : '';
+
       const limiteHtml = limiteTotal > 0 ? `
-        <div class="cc-limit-info">
-          <div class="cc-limit-row">
-            <span class="cc-limit-label">Fatura atual</span>
-            <span class="cc-limit-value negative">${fmtMoney(faturaAtual)}</span>
+        <div class="cc-metrics">
+          <div class="cc-metrics-row">
+            <div class="cc-metric">
+              <span class="cc-metric-label">Fatura</span>
+              <strong class="cc-metric-value is-expense">${fmtMoney(faturaAtual)}</strong>
+            </div>
+            <div class="cc-metric">
+              <span class="cc-metric-label">Disponível</span>
+              <strong class="cc-metric-value is-available">${fmtMoney(limiteDisponivel)}</strong>
+            </div>
+            <div class="cc-metric">
+              <span class="cc-metric-label">Limite</span>
+              <strong class="cc-metric-value">${fmtMoney(limiteTotal)}</strong>
+            </div>
           </div>
-          <div class="cc-limit-row">
-            <span class="cc-limit-label">Limite disponível</span>
-            <span class="cc-limit-value positive">${fmtMoney(limiteDisponivel)}</span>
+          <div class="cc-usage" aria-label="Utilização do limite">
+            <div class="cc-usage-track">
+              <div class="cc-usage-fill ${utilizacaoClass}" style="width:${utilizacaoPct}%"></div>
+            </div>
+            <span class="cc-usage-text">${utilizacaoPct}% utilizado</span>
           </div>
-          <div class="cc-usage-bar">
-            <div class="cc-usage-fill ${utilizacaoClass}" style="width:${utilizacaoPct}%"></div>
-          </div>
-          <div class="cc-usage-label">${utilizacaoPct}% utilizado de ${fmtMoney(limiteTotal)}</div>
-        </div>` : '';
-      
+        </div>` : `
+        <div class="cc-metrics cc-metrics-empty">
+          <span class="cc-metric-hint">Defina o limite do cartão para acompanhar fatura e utilização.</span>
+        </div>`;
+
       card.innerHTML = `
-        <div class="cc-top">
-          <span class="cc-chip"></span>
-          <span class="cc-brand">${bancoNome} ${planoNome}</span>
-          <div class="card-actions">
-            <button class="table-action-btn edit" data-action="edit-cartao" data-index="${index}" title="Editar cartão"><i data-lucide="edit"></i></button>
-            <button class="table-action-btn delete" data-action="delete-cartao" data-index="${index}" title="Excluir cartão"><i data-lucide="trash-2"></i></button>
+        <div class="cc-face">
+          <div class="cc-face-top">
+            <div class="cc-brand-block">
+              <span class="cc-bank">${escapeHtml(bancoNome)}</span>
+              <span class="cc-plan">${escapeHtml(planoNome)}</span>
+            </div>
+            <div class="cc-actions card-actions">
+              <button type="button" class="cc-icon-btn" data-action="edit-cartao" data-index="${index}" title="Editar cartão" aria-label="Editar cartão"><i data-lucide="pencil"></i></button>
+              <button type="button" class="cc-icon-btn is-danger" data-action="delete-cartao" data-index="${index}" title="Excluir cartão" aria-label="Excluir cartão"><i data-lucide="trash-2"></i></button>
+            </div>
+          </div>
+          <div class="cc-face-mid">
+            <span class="cc-chip" aria-hidden="true"></span>
+            <span class="cc-contactless" aria-hidden="true"></span>
+          </div>
+          <div class="cc-number" aria-label="Final ${last4}">•••• •••• •••• ${last4}</div>
+          <div class="cc-face-bottom">
+            <div class="cc-field">
+              <span class="cc-field-label">Titular</span>
+              <span class="cc-field-value">${titular}</span>
+            </div>
+            <div class="cc-field cc-field-exp">
+              <span class="cc-field-label">Validade</span>
+              <span class="cc-field-value">${validade}</span>
+            </div>
           </div>
         </div>
-        <div class="cc-number">•••• •••• •••• ${escapeHtml(String(cartao.numero || ''))}</div>
-        <div class="cc-bottom"><span>${escapeHtml(cartao.titular || '')}</span><span>${escapeHtml(cartao.validade || '')}</span></div>
-        ${cartao.diaVencimento ? `<div class="cc-due">Fatura vence dia ${escapeHtml(String(cartao.diaVencimento))}</div>` : ''}
-        ${limiteHtml}
+        <div class="cc-footer">
+          ${vencHtml}
+          ${limiteHtml}
+        </div>
       `;
       cartoesGrid.appendChild(card);
     });
@@ -3315,11 +3725,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const risk = analyzeCarteiraRisk((Array.isArray(investimentos) ? investimentos : []).map(normalizeInvestimento));
     const goalsList = Array.isArray(goals) ? goals : [];
     el.innerHTML = `
-      <div class="pi-insight-card" data-goto="visao"><div class="ic-icon">📈</div><div class="ic-title">Crescimento</div><div class="ic-desc">${rent >= 0 ? '+' : ''}${rent.toFixed(2)}% · ${totalLucro >= 0 ? '+' : ''}${fmtMoney(totalLucro)}</div></div>
-      <div class="pi-insight-card" data-goto="risco"><div class="ic-icon">⚠️</div><div class="ic-title">Risco</div><div class="ic-desc">${escapeHtml(risk.nivel)}</div></div>
-      <div class="pi-insight-card" data-goto="metas"><div class="ic-icon">🎯</div><div class="ic-title">Metas</div><div class="ic-desc">${goalsList.length} meta(s) vinculadas</div></div>
-      <div class="pi-insight-card" data-goto="visao"><div class="ic-icon">💰</div><div class="ic-title">Rentabilidade</div><div class="ic-desc">${rent >= 0 ? '+' : ''}${rent.toFixed(2)}% acumulada</div></div>
-      <div class="pi-insight-card" data-goto="visao"><div class="ic-icon">📊</div><div class="ic-title">Diversificação</div><div class="ic-desc">${risk.nClasses || 0} classe(s) · ${qtd} ativo(s)</div></div>
+      <div class="pi-insight-card" data-goto="visao"><div class="ic-icon"><i data-lucide="trending-up"></i></div><div class="ic-title">Crescimento</div><div class="ic-desc">${rent >= 0 ? '+' : ''}${rent.toFixed(2)}% · ${totalLucro >= 0 ? '+' : ''}${fmtMoney(totalLucro)}</div></div>
+      <div class="pi-insight-card" data-goto="risco"><div class="ic-icon"><i data-lucide="alert-triangle"></i></div><div class="ic-title">Risco</div><div class="ic-desc">${escapeHtml(risk.nivel)}</div></div>
+      <div class="pi-insight-card" data-goto="metas"><div class="ic-icon"><i data-lucide="target"></i></div><div class="ic-title">Metas</div><div class="ic-desc">${goalsList.length} meta(s) vinculadas</div></div>
+      <div class="pi-insight-card" data-goto="visao"><div class="ic-icon"><i data-lucide="wallet"></i></div><div class="ic-title">Rentabilidade</div><div class="ic-desc">${rent >= 0 ? '+' : ''}${rent.toFixed(2)}% acumulada</div></div>
+      <div class="pi-insight-card" data-goto="visao"><div class="ic-icon"><i data-lucide="pie-chart"></i></div><div class="ic-title">Diversificação</div><div class="ic-desc">${risk.nClasses || 0} classe(s) · ${qtd} ativo(s)</div></div>
       <div class="pi-insight-card" data-goto="ia"><div class="ic-icon">🤖</div><div class="ic-title">Prisma AI</div><div class="ic-desc">Insights da carteira</div></div>
     `;
     el.querySelectorAll('[data-goto]').forEach((card) => {
@@ -3369,93 +3779,93 @@ document.addEventListener('DOMContentLoaded', () => {
       const JsPDF = await ensurePdfLibrary();
       showToast('Preparando relatório da carteira...');
       const totals = getCarteiraTotals();
-    const rawActive = totals.list
-      .map((inv, index) => ({ ...normalizeInvestimento(inv), _index: index }))
-      .filter((i) => i.status !== 'resgatado');
-    const list = consolidateInvestimentosForDisplay(rawActive);
-    const totalInvestido = totals.totalInvestido;
-    const totalAtual = totals.totalAtual;
-    const totalLucro = totals.totalLucro;
-    const rent = totals.rent;
-    const qtd = list.length;
-    const logoData = await loadPrismaLogoForPDF();
-    try {
-    const pdf = new JsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-    const margin = 40;
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const contentWidth = pageWidth - margin * 2;
-    let y = drawPrismaHeader(pdf, {
-      margin,
-      logoData,
-      title: 'Prisma Invest',
-      subtitle: 'Relatório da Carteira de Investimentos'
-    });
-    y += 8;
-    y = pdfDrawKpiRow(pdf, [
-      { label: 'Patrimônio atual', value: fmtMoney(totalAtual), color: [37, 99, 235] },
-      { label: 'Total investido', value: fmtMoney(totalInvestido), color: [13, 148, 136] },
-      { label: 'Resultado', value: fmtMoney(totalLucro), color: totalLucro >= 0 ? [22, 163, 74] : [220, 38, 38] },
-      { label: 'Rentabilidade', value: totalInvestido > 0 ? (rent.toFixed(2) + '%') : 'N/A', color: [124, 58, 237] }
-    ], margin, y, contentWidth);
-    y = pdfSectionTitle(pdf, `Posições (${qtd})`, margin, y);
-    y += 6;
-    if (!list.length) {
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-      pdf.setTextColor(100, 116, 139);
-      pdf.text('Não existem posições suficientes para listar neste relatório.', margin, y);
-      y += 20;
-    } else {
-      // table header
-      pdf.setFillColor(241, 245, 249);
-      pdf.roundedRect(margin, y - 4, contentWidth, 18, 3, 3, 'F');
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(8);
-      pdf.setTextColor(100, 116, 139);
-      pdf.text('Ativo', margin + 6, y + 8);
-      pdf.text('Tipo', margin + 160, y + 8);
-      pdf.text('Aplicado', margin + 250, y + 8);
-      pdf.text('Atual', margin + 340, y + 8);
-      pdf.text('Rent.%', margin + 430, y + 8);
-      y += 22;
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(9);
-      list.forEach((inv, idx) => {
-        if (y > 720) {
-          pdf.addPage();
-          y = drawPrismaHeader(pdf, {
-            margin, logoData,
-            title: 'Prisma Invest',
-            subtitle: 'Relatório da Carteira de Investimentos',
-            showProfile: false
-          }) + 12;
+      const rawActive = totals.list
+        .map((inv, index) => ({ ...normalizeInvestimento(inv), _index: index }))
+        .filter((i) => i.status !== 'resgatado');
+      const list = consolidateInvestimentosForDisplay(rawActive);
+      const totalInvestido = totals.totalInvestido;
+      const totalAtual = totals.totalAtual;
+      const totalLucro = totals.totalLucro;
+      const rent = totals.rent;
+      const qtd = list.length;
+      const logoData = await loadPrismaLogoForPDF();
+      try {
+        const pdf = new JsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+        const margin = 40;
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const contentWidth = pageWidth - margin * 2;
+        let y = drawPrismaHeader(pdf, {
+          margin,
+          logoData,
+          title: 'Prisma Invest',
+          subtitle: 'Relatório da Carteira de Investimentos'
+        });
+        y += 8;
+        y = pdfDrawKpiRow(pdf, [
+          { label: 'Patrimônio atual', value: fmtMoney(totalAtual), color: [37, 99, 235] },
+          { label: 'Total investido', value: fmtMoney(totalInvestido), color: [13, 148, 136] },
+          { label: 'Resultado', value: fmtMoney(totalLucro), color: totalLucro >= 0 ? [22, 163, 74] : [220, 38, 38] },
+          { label: 'Rentabilidade', value: totalInvestido > 0 ? (rent.toFixed(2) + '%') : 'N/A', color: [124, 58, 237] }
+        ], margin, y, contentWidth);
+        y = pdfSectionTitle(pdf, `Posições (${qtd})`, margin, y);
+        y += 6;
+        if (!list.length) {
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(10);
+          pdf.setTextColor(100, 116, 139);
+          pdf.text('Não existem posições suficientes para listar neste relatório.', margin, y);
+          y += 20;
+        } else {
+          // table header
+          pdf.setFillColor(241, 245, 249);
+          pdf.roundedRect(margin, y - 4, contentWidth, 18, 3, 3, 'F');
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 116, 139);
+          pdf.text('Ativo', margin + 6, y + 8);
+          pdf.text('Tipo', margin + 160, y + 8);
+          pdf.text('Aplicado', margin + 250, y + 8);
+          pdf.text('Atual', margin + 340, y + 8);
+          pdf.text('Rent.%', margin + 430, y + 8);
+          y += 22;
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+          list.forEach((inv, idx) => {
+            if (y > 720) {
+              pdf.addPage();
+              y = drawPrismaHeader(pdf, {
+                margin, logoData,
+                title: 'Prisma Invest',
+                subtitle: 'Relatório da Carteira de Investimentos',
+                showProfile: false
+              }) + 12;
+            }
+            if (idx % 2 === 0) {
+              pdf.setFillColor(248, 250, 252);
+              pdf.rect(margin, y - 8, contentWidth, 16, 'F');
+            }
+            pdf.setTextColor(15, 23, 42);
+            pdf.text(pdfTruncate(pdf, String(inv.nome || '—'), 140), margin + 6, y);
+            pdf.setTextColor(100, 116, 139);
+            pdf.text(pdfTruncate(pdf, String(TIPO_LABELS[inv.tipo] || inv.tipo || '—'), 80), margin + 160, y);
+            pdf.text(fmtMoney(getInvestValorAplicado(inv)), margin + 250, y);
+            pdf.text(fmtMoney(getInvestValorAtual(inv)), margin + 340, y);
+            const r = getInvestRent(inv);
+            pdf.setTextColor(r >= 0 ? 22 : 220, r >= 0 ? 163 : 38, r >= 0 ? 74 : 38);
+            pdf.text(`${r.toFixed(2)}%`, margin + 430, y);
+            y += 16;
+          });
         }
-        if (idx % 2 === 0) {
-          pdf.setFillColor(248, 250, 252);
-          pdf.rect(margin, y - 8, contentWidth, 16, 'F');
-        }
-        pdf.setTextColor(15, 23, 42);
-        pdf.text(pdfTruncate(pdf, String(inv.nome || '—'), 140), margin + 6, y);
-        pdf.setTextColor(100, 116, 139);
-        pdf.text(pdfTruncate(pdf, String(TIPO_LABELS[inv.tipo] || inv.tipo || '—'), 80), margin + 160, y);
-        pdf.text(fmtMoney(getInvestValorAplicado(inv)), margin + 250, y);
-        pdf.text(fmtMoney(getInvestValorAtual(inv)), margin + 340, y);
-        const r = getInvestRent(inv);
-        pdf.setTextColor(r >= 0 ? 22 : 220, r >= 0 ? 163 : 38, r >= 0 ? 74 : 38);
-        pdf.text(`${r.toFixed(2)}%`, margin + 430, y);
-        y += 16;
-      });
-    }
-    drawPrismaFooterAllPages(pdf, {
-      margin,
-      disclaimer: 'Este documento possui caráter informativo e não constitui recomendação de investimento.'
-    });
-    pdf.save(`prisma-invest-${new Date().toISOString().slice(0, 10)}.pdf`);
-    showToast('PDF da carteira pronto!');
-    } catch (err) {
-      console.error('PDF carteira:', err);
-      showToast('Não foi possível gerar o PDF da carteira. Tente novamente.');
-    }
+        drawPrismaFooterAllPages(pdf, {
+          margin,
+          disclaimer: 'Este documento possui caráter informativo e não constitui recomendação de investimento.'
+        });
+        pdf.save(`prisma-invest-${new Date().toISOString().slice(0, 10)}.pdf`);
+        showToast('PDF da carteira pronto!');
+      } catch (err) {
+        console.error('PDF carteira:', err);
+        showToast('Não foi possível gerar o PDF da carteira. Tente novamente.');
+      }
     } catch (err) {
       console.error('Preparação do PDF carteira:', err);
       showToast('Não foi possível preparar o PDF da carteira. Tente novamente.');
@@ -3500,6 +3910,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab === 'historico') renderHistoricoPanel();
     }
     refreshIcons();
+    // Redimensiona gráficos após o layout da seção ficar visível
+    requestAnimationFrame(() => {
+      try {
+        [portfolioChart, portfolioEvolutionChart, portfolioLucroChart, portfolioProjecaoChart].forEach((ch) => {
+          if (ch && typeof ch.resize === 'function') ch.resize();
+        });
+      } catch (_) { }
+    });
   }
 
   function renderCarteiraList() {
@@ -3763,7 +4181,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (new Date(inv.dataAplicacao).getTime() < cutoff && inv.status !== 'resgatado') {
             acc += getInvestValorAplicado(inv);
           }
-        } catch (_) {}
+        } catch (_) { }
       });
       if (acc > 0) points.push({ label: 'Início período', value: acc });
     }
@@ -3867,8 +4285,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const portfolioTotal = getCarteiraTotals().totalAtual || 1;
     const exposure = Math.max(0, Math.min(100, (valorAtual / portfolioTotal) * 100));
 
-    const tabButtons = ['visao','posicoes','risco','metas','projecao','ia','historico'].map((t) => {
-      const labels = { visao:'Visão geral', posicoes:'Posições', risco:'Risco', metas:'Metas', projecao:'Projeção', ia:'Prisma AI', historico:'Histórico' };
+    const tabButtons = ['visao', 'posicoes', 'risco', 'metas', 'projecao', 'ia', 'historico'].map((t) => {
+      const labels = { visao: 'Visão geral', posicoes: 'Posições', risco: 'Risco', metas: 'Metas', projecao: 'Projeção', ia: 'Prisma AI', historico: 'Histórico' };
       return `<button type="button" class="invest-detail-tab ${tab === t ? 'active' : ''}" data-invest-detail-tab="${t}" role="tab" aria-selected="${tab === t}">${labels[t]}</button>`;
     }).join('');
 
@@ -3898,7 +4316,7 @@ document.addEventListener('DOMContentLoaded', () => {
       content = `
         <div class="detail-section-heading"><h4>Posição consolidada</h4><p>Composição e preço de entrada deste ativo na carteira.</p></div>
         <div class="detalhe-grid detail-kpi-grid">
-          <div class="detalhe-item"><div class="di-label">Quantidade</div><div class="di-value">${inv.quantidade != null ? Number(inv.quantidade).toLocaleString('pt-BR', {maximumFractionDigits:6}) : '—'}</div></div>
+          <div class="detalhe-item"><div class="di-label">Quantidade</div><div class="di-value">${inv.quantidade != null ? Number(inv.quantidade).toLocaleString('pt-BR', { maximumFractionDigits: 6 }) : '—'}</div></div>
           <div class="detalhe-item"><div class="di-label">Preço médio</div><div class="di-value">${inv.precoMedio != null ? fmtMoney(inv.precoMedio) : '—'}</div></div>
           <div class="detalhe-item"><div class="di-label">Valor aplicado</div><div class="di-value">${fmtMoney(aplicado)}</div></div>
           <div class="detalhe-item"><div class="di-label">Valor atual</div><div class="di-value">${fmtMoney(valorAtual)}</div></div>
@@ -3906,14 +4324,14 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="detail-exposure"><div class="detail-exposure-head"><span>Participação na carteira</span><strong>${exposure.toFixed(1)}%</strong></div><div class="detail-progress"><span style="width:${exposure}%"></span></div></div>
       `;
     } else if (tab === 'risco') {
-      const riskClass = String(risk.nivel).toLowerCase().replace(/\s+/g,'-');
+      const riskClass = String(risk.nivel).toLowerCase().replace(/\s+/g, '-');
       content = `
         <div class="detail-risk-hero"><div class="detail-risk-badge ${riskClass}"><i data-lucide="shield-alert"></i><strong>${escapeHtml(risk.nivel)}</strong></div><div><h4>Risco do ativo</h4><p>Classificação informativa baseada no tipo de investimento. Não constitui recomendação.</p></div></div>
-        <div class="detail-info-grid"><div><span>Liquidez</span><strong>${escapeHtml(risk.liquidez)}</strong></div><div><span>Garantia</span><strong>${escapeHtml(risk.garantia)}</strong></div><div><span>Exposição na carteira</span><strong>${exposure.toFixed(1)}%</strong></div><div><span>Volatilidade esperada</span><strong>${['ações','fiis','etfs','criptomoedas'].includes(inv.tipo) ? 'Média/alta' : 'Baixa/moderada'}</strong></div></div>
+        <div class="detail-info-grid"><div><span>Liquidez</span><strong>${escapeHtml(risk.liquidez)}</strong></div><div><span>Garantia</span><strong>${escapeHtml(risk.garantia)}</strong></div><div><span>Exposição na carteira</span><strong>${exposure.toFixed(1)}%</strong></div><div><span>Volatilidade esperada</span><strong>${['ações', 'fiis', 'etfs', 'criptomoedas'].includes(inv.tipo) ? 'Média/alta' : 'Baixa/moderada'}</strong></div></div>
       `;
     } else if (tab === 'metas') {
       content = `<div class="detail-section-heading"><h4>Metas relacionadas ao patrimônio</h4><p>Acompanhe como este ativo pode contribuir para seus objetivos financeiros.</p></div>`;
-      content += goalsList.length ? `<div class="detail-goals-grid">${goalsList.map(g => { const current=Number(g.current)||0,target=Number(g.target)||1,pct=Math.min(100,Math.round(current/target*100)); return `<div class="pi-meta-card"><div class="pm-name">${escapeHtml(g.name||'Meta')}</div><div class="pm-values"><span>${fmtMoney(current)}</span><span>${fmtMoney(target)}</span></div><div class="pi-meta-progress"><span style="width:${pct}%"></span></div><div class="pm-footer"><span>${pct}% concluído</span><span>${g.year||'—'}</span></div></div>`; }).join('')}</div>` : '<div class="portfolio-empty">Nenhuma meta cadastrada. Crie uma meta para acompanhar a conexão com seus investimentos.</div>';
+      content += goalsList.length ? `<div class="detail-goals-grid">${goalsList.map(g => { const current = Number(g.current) || 0, target = Number(g.target) || 1, pct = Math.min(100, Math.round(current / target * 100)); return `<div class="pi-meta-card"><div class="pm-name">${escapeHtml(g.name || 'Meta')}</div><div class="pm-values"><span>${fmtMoney(current)}</span><span>${fmtMoney(target)}</span></div><div class="pi-meta-progress"><span style="width:${pct}%"></span></div><div class="pm-footer"><span>${pct}% concluído</span><span>${g.year || '—'}</span></div></div>`; }).join('')}</div>` : '<div class="portfolio-empty">Nenhuma meta cadastrada. Crie uma meta para acompanhar a conexão com seus investimentos.</div>';
     } else if (tab === 'projecao') {
       content = `
         <div class="detail-section-heading"><h4>Projeção indicativa</h4><p>Simulação sem novos aportes, usando uma taxa anual de ${proj.annual.toFixed(2)}% como referência.</p></div>
@@ -3931,7 +4349,7 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     } else if (tab === 'historico') {
       content = `<div class="detail-section-heading"><h4>Histórico de movimentações</h4><p>Registro de aportes, resgates e rendimentos deste ativo.</p></div>`;
-      content += hist.length ? `<ul class="historico-list detail-historico-list">${hist.map(h => `<li><span><span class="hist-tipo ${escapeHtml(h.tipo||'')}">${escapeHtml((h.tipo||'').toUpperCase())}</span> ${formatDateBR(h.data)}${h.obs ? ' · '+escapeHtml(h.obs) : ''}</span><strong class="${h.tipo==='resgate'?'negative':'positive'}">${h.tipo==='resgate'?'-':'+'}${fmtMoney(Number(h.valor)||0)}</strong></li>`).join('')}</ul>` : '<div class="portfolio-empty">Nenhuma movimentação registrada para este ativo.</div>';
+      content += hist.length ? `<ul class="historico-list detail-historico-list">${hist.map(h => `<li><span><span class="hist-tipo ${escapeHtml(h.tipo || '')}">${escapeHtml((h.tipo || '').toUpperCase())}</span> ${formatDateBR(h.data)}${h.obs ? ' · ' + escapeHtml(h.obs) : ''}</span><strong class="${h.tipo === 'resgate' ? 'negative' : 'positive'}">${h.tipo === 'resgate' ? '-' : '+'}${fmtMoney(Number(h.valor) || 0)}</strong></li>`).join('')}</ul>` : '<div class="portfolio-empty">Nenhuma movimentação registrada para este ativo.</div>';
     }
 
     body.innerHTML = `<div class="invest-detail-tabs" role="tablist">${tabButtons}</div><div class="invest-detail-content">${content}</div>`;
@@ -3986,9 +4404,9 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    allTrans.sort((a,b) => {
-      const da=new Date(String(a.rawDate || '').includes('T') ? a.rawDate : `${a.rawDate || ''}T00:00:00`);
-      const db=new Date(String(b.rawDate || '').includes('T') ? b.rawDate : `${b.rawDate || ''}T00:00:00`);
+    allTrans.sort((a, b) => {
+      const da = new Date(String(a.rawDate || '').includes('T') ? a.rawDate : `${a.rawDate || ''}T00:00:00`);
+      const db = new Date(String(b.rawDate || '').includes('T') ? b.rawDate : `${b.rawDate || ''}T00:00:00`);
       return (Number.isNaN(db.getTime()) ? 0 : db.getTime()) - (Number.isNaN(da.getTime()) ? 0 : da.getTime());
     });
     allTrans.slice(0, 10).forEach((t) => {
@@ -4161,9 +4579,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     updateEconomiaCard(saldoAtualCalc, saldoAnteriorCalc);
-    try { if (typeof updateIncomeExpenseCard === 'function') updateIncomeExpenseCard(ctx); } catch (_) {}
-    try { if (typeof updateMonitoringCenter === 'function') updateMonitoringCenter(ctx); } catch (_) {}
-    
+    try { if (typeof updateIncomeExpenseCard === 'function') updateIncomeExpenseCard(ctx); } catch (_) { }
+    try { if (typeof updateMonitoringCenter === 'function') updateMonitoringCenter(ctx); } catch (_) { }
+
     // Atualiza resumos do Grand Card Visão Financeira
     const elGrandKpiCashflow = document.getElementById('grandKpiCashflow');
     const elGrandModuleCashflowVal = document.getElementById('grandModuleCashflowVal');
@@ -4186,7 +4604,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     updateWalletColor();
-    if (typeof refreshIcons === 'function') try { refreshIcons(); } catch (_) {}
+    if (typeof refreshIcons === 'function') try { refreshIcons(); } catch (_) { }
   }
 
   function updateDashInsightAndAlerts(ctx) {
@@ -4566,13 +4984,13 @@ document.addEventListener('DOMContentLoaded', () => {
         [...revenueResult.alerts]
           .sort((a, b) => (priorityOrder[a.prioridade] ?? 4) - (priorityOrder[b.prioridade] ?? 4))
           .forEach((alert) => {
-          const item = document.createElement('div');
-          item.className = `monitoring-item priority-${alert.prioridade} ${alert.lido ? 'is-read' : 'is-unread'}`;
-          item.setAttribute('data-alert-id', alert.id);
+            const item = document.createElement('div');
+            item.className = `monitoring-item priority-${alert.prioridade} ${alert.lido ? 'is-read' : 'is-unread'}`;
+            item.setAttribute('data-alert-id', alert.id);
 
-          const prioIcon = alert.prioridade === 'critica' ? 'alert-triangle' : alert.prioridade === 'alta' ? 'alert-circle' : 'info';
-          const alertDate = alert.dataReferencia ? fmtDateBR(String(alert.dataReferencia)) : '';
-          item.innerHTML = `
+            const prioIcon = alert.prioridade === 'critica' ? 'alert-triangle' : alert.prioridade === 'alta' ? 'alert-circle' : 'info';
+            const alertDate = alert.dataReferencia ? fmtDateBR(String(alert.dataReferencia)) : '';
+            item.innerHTML = `
             <div class="m-item-top">
               <span class="m-item-badge ${alert.prioridade}">
                 <i data-lucide="${prioIcon}"></i> ${escapeHtml(alert.prioridadeLabel)}
@@ -4601,7 +5019,7 @@ document.addEventListener('DOMContentLoaded', () => {
               `}
             </div>
           `;
-          alertsListEl.appendChild(item);
+            alertsListEl.appendChild(item);
           });
       }
     }
@@ -4851,7 +5269,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           if (typeof getInvestValorAplicado === 'function') a = Number(getInvestValorAplicado(inv)) || 0;
           if (typeof getInvestValorAtual === 'function') cur = Number(getInvestValorAtual(inv));
-        } catch (_) {}
+        } catch (_) { }
         if (!a) {
           a = this.money(inv.valorAplicado != null ? inv.valorAplicado : (inv.valorInvestido != null ? inv.valorInvestido : inv.valor));
         }
@@ -4954,7 +5372,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let __financeCtxVersion = 0;
   let __financeDataVersion = 0;
   const __sectionDirty = Object.create(null);
-  ['receitas','despesas','contas','cartoes','investimentos','metas','dashboard','centro-financeiro','carteira-ativos'].forEach((k) => { __sectionDirty[k] = true; });
+  ['receitas', 'despesas', 'contas', 'cartoes', 'investimentos', 'metas', 'dashboard', 'centro-financeiro', 'carteira-ativos'].forEach((k) => { __sectionDirty[k] = true; });
   let __persistTimer = null;
 
   function bumpFinanceDataVersion() {
@@ -4978,7 +5396,7 @@ document.addEventListener('DOMContentLoaded', () => {
         saveDataStorage(STORAGE_KEYS.cartoes, cartoes);
         saveDataStorage(STORAGE_KEYS.investimentos, investimentos);
         saveDataStorage(STORAGE_KEYS.goals, goals);
-        saveDataStorage(STORAGE_KEYS.monthlyFlow, { inc: incomeData, exp: expenseData });
+        saveDataStorage(STORAGE_KEYS.monthlyFlow, { inc: incomeData, exp: expenseData, keys: getLast12Months().keys });
         if (typeof categories !== 'undefined') saveDataStorage(STORAGE_KEYS.categories, categories);
         if (typeof summaryData !== 'undefined') setJSONToStorage(STORAGE_KEYS.summary, summaryData);
       } catch (e) { console.warn('Persistência financeira:', e); }
@@ -5005,7 +5423,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!k || !k.length) k = getJSONFromStorage(STORAGE_KEYS.cartoes, k || []);
         if (!i || !i.length) i = getJSONFromStorage(STORAGE_KEYS.investimentos, i || []);
         if (!g || !g.length) g = getJSONFromStorage(STORAGE_KEYS.goals, g || []);
-      } catch (_) {}
+      } catch (_) { }
     }
     return {
       receitas: Array.isArray(r) ? r : [],
@@ -5030,7 +5448,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (Array.isArray(lists.cartoes) && lists.cartoes.length && (!cartoes || !cartoes.length)) cartoes = lists.cartoes;
       if (Array.isArray(lists.investimentos) && lists.investimentos.length && (!investimentos || !investimentos.length)) investimentos = lists.investimentos;
       if (Array.isArray(lists.goals) && lists.goals.length && (!goals || !goals.length)) goals = lists.goals;
-    } catch (_) {}
+    } catch (_) { }
 
     const inv = PrismaFinance.getInvestTotals(lists.investimentos);
     const contasTotal = PrismaFinance.getAccountsTotal(lists.contas);
@@ -5045,7 +5463,7 @@ document.addEventListener('DOMContentLoaded', () => {
       receitasMes = inc;
       despesasMes = exp;
       economiaMes = inc - exp;
-    } catch (_) {}
+    } catch (_) { }
 
     const cashFlow = inc - exp;
     const sr = PrismaFinance.savingsRate(inc, exp);
@@ -5063,7 +5481,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (i && i.status !== 'resgatado') set.add(String(i.tipo || 'outros'));
       });
       investClasses = set.size;
-    } catch (_) {}
+    } catch (_) { }
     let eduPoints = 0, eduCompleted = 0, eduQuizzes = 0;
     try {
       if (typeof getEducationData === 'function') {
@@ -5072,7 +5490,7 @@ document.addEventListener('DOMContentLoaded', () => {
         eduCompleted = (ed.completed || []).length;
         eduQuizzes = (ed.quizzesCompleted || []).length;
       }
-    } catch (_) {}
+    } catch (_) { }
     const score = PrismaFinance.computeScore({
       savingsRate: sr,
       cardUtilPct: cardUtil.pct,
@@ -5306,20 +5724,18 @@ document.addEventListener('DOMContentLoaded', () => {
           { type: 'line', label: 'Fluxo acumulado', data: cumulative, borderColor: '#60a5fa', backgroundColor: 'rgba(96, 165, 250, 0.12)', fill: false, tension: 0.25, pointRadius: 2, pointHoverRadius: 5, yAxisID: 'y' }
         ]
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
+      options: prismaInteractiveLineOpts({
         plugins: {
           legend: { labels: { color: '#cbd5e1', usePointStyle: true, boxWidth: 8 } },
-          tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${fmtMoney(item.raw)}` } }
+          tooltip: prismaTooltipBRL()
         },
         scales: {
           x: { stacked: false, grid: { display: false }, ticks: { color: '#94a3b8', maxTicksLimit: 12, maxRotation: 0 } },
-          y: { grid: { color: 'rgba(148,163,184,0.12)' }, ticks: { color: '#94a3b8', callback: (value) => fmtMoney(value) } }
+          y: { grid: { color: 'rgba(148,163,184,0.12)' }, ticks: { color: '#94a3b8', callback: (v) => prismaFmtBRLCompact(v) } }
         }
-      }
+      })
     });
+    prismaBindResetZoom(cfFlowChartInstance, canvas);
   }
 
   function renderCentroDistribution(filter) {
@@ -5368,10 +5784,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cutout: '66%',
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: (item) => {
-            const total = entries.reduce((sum, entry) => sum + entry[1], 0);
-            return `${item.label}: ${fmtMoney(item.raw)} (${total ? (item.raw / total * 100).toFixed(1) : 0}%)`;
-          } } }
+          tooltip: prismaTooltipPieBRL(entries.reduce((sum, entry) => sum + entry[1], 0))
         },
         onClick: (_event, elements) => {
           const index = elements[0]?.index;
@@ -5488,7 +5901,7 @@ document.addEventListener('DOMContentLoaded', () => {
       'computeNetWorth', 'transferAccounts', 'groupInvestmentsByCategory'
     ];
     if (typeof window.PrismaFinance === 'object' && window.PrismaFinance &&
-        typeof window.PrismaFinance.analyzeFinances !== 'function') {
+      typeof window.PrismaFinance.analyzeFinances !== 'function') {
       // Tenta encontrar o engine pelo objeto global direto
       const eng = window.PrismaFinance;
       AI_METHODS.forEach(m => {
@@ -5623,7 +6036,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let cfModalOpener = null;
   function closeCentroModal(modal, restoreFocus = true) {
     if (!modal) return;
-    modal.classList.remove('show');
+    modal.classList.remove('show', 'is-open');
     modal.setAttribute('aria-hidden', 'true');
     if (restoreFocus && cfModalOpener && document.contains(cfModalOpener)) cfModalOpener.focus();
     cfModalOpener = null;
@@ -5640,9 +6053,18 @@ document.addEventListener('DOMContentLoaded', () => {
       event.preventDefault();
       document.querySelectorAll('.cf-modal-overlay.show').forEach((openModal) => closeCentroModal(openModal, false));
       cfModalOpener = opener;
-      modal.classList.add('show');
+      modal.classList.add('show', 'is-open');
       modal.setAttribute('aria-hidden', 'false');
       renderCentroOverview();
+      // Redesenha gráficos do centro após o modal ficar visível
+      setTimeout(() => {
+        try {
+          if (typeof cfFlowChartInstance !== 'undefined' && cfFlowChartInstance?.resize) cfFlowChartInstance.resize();
+          if (typeof cfDistributionChartInstance !== 'undefined' && cfDistributionChartInstance?.resize) cfDistributionChartInstance.resize();
+          if (typeof cashflowChart !== 'undefined' && cashflowChart?.resize) cashflowChart.resize();
+          if (typeof pieChart !== 'undefined' && pieChart?.resize) pieChart.resize();
+        } catch (_) { }
+      }, 80);
       if (typeof refreshIcons === 'function') refreshIcons();
       modal.querySelector('[data-cf-close]')?.focus();
       return;
@@ -5719,7 +6141,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (navCF) navCF.addEventListener('click', () => {
     setTimeout(() => {
       try { updateCentroFinanceiro(); } catch (err) { console.warn('Centro financeiro:', err); }
-      try { runCentroSimulacao(); } catch (_) {}
+      try { runCentroSimulacao(); } catch (_) { }
       if (typeof refreshIcons === 'function') refreshIcons();
     }, 0);
   });
@@ -5747,7 +6169,7 @@ document.addEventListener('DOMContentLoaded', () => {
         email: email || null,
         updatedAt: new Date().toISOString()
       }));
-    } catch (_) {}
+    } catch (_) { }
   }
 
   /** Fonte única: currentProfile → sessão salva → lista de perfis → userData legado */
@@ -5762,7 +6184,7 @@ document.addEventListener('DOMContentLoaded', () => {
         email = String(currentProfile.email || '').trim();
         id = currentProfile.id || null;
       }
-    } catch (_) {}
+    } catch (_) { }
 
     if (!name || !email) {
       try {
@@ -5772,7 +6194,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!email) email = String(u.email || '').trim();
           if (!id) id = u.id || null;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (!name || !email) {
@@ -5789,7 +6211,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!email) email = String(p.email || '').trim();
           if (!id) id = p.id || null;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (!name || !email) {
@@ -5799,10 +6221,9 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!name) name = String(ud.name || ud.nome || '').trim();
           if (!email) email = String(ud.email || '').trim();
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
-    // Ignore placeholder/demo labels
     const invalid = /^(usu[aá]rio(\s+teste)?|user(\s+test)?|admin|teste|undefined|null|-)$/i;
     if (name && invalid.test(name)) name = '';
     if (email && /^(teste@example\.com|test@test\.com|user@example\.com)$/i.test(email)) {
@@ -5867,7 +6288,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         if (typeof fmtMoney === 'function') return fmtMoney(v);
         if (typeof formatCurrency === 'function') return formatCurrency(v);
-      } catch (_) {}
+      } catch (_) { }
       return String(v ?? '');
     }
 
@@ -6022,7 +6443,7 @@ document.addEventListener('DOMContentLoaded', () => {
           });
           if (catHits.length) groups.push({ title: 'Categorias', items: catHits.slice(0, MAX_PER_GROUP) });
         }
-      } catch (_) {}
+      } catch (_) { }
 
       return groups;
     }
@@ -6120,6 +6541,108 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
+  /**
+   * Avalia alertas de gastos em tempo real com base nas despesas cadastradas.
+   * @param {{ lastExpense?: object, notify?: boolean }} opts
+   */
+  function evaluateRealtimeSpendAlerts(opts = {}) {
+    const notify = opts.notify !== false;
+    const lastExpense = opts.lastExpense || null;
+    const engine = window.PrismaMonitoringCenter;
+    if (!engine || typeof engine.generateExpenseAlerts !== 'function') return null;
+
+    let categoryBudgets = {};
+    try {
+      const key = typeof getScopedStorageKey === 'function'
+        ? getScopedStorageKey('prisma_category_budgets_v1')
+        : 'prisma_category_budgets_v1';
+      categoryBudgets = getJSONFromStorage(key, {}) || {};
+    } catch (_) {
+      categoryBudgets = {};
+    }
+
+    const result = engine.generateExpenseAlerts({
+      despesas: Array.isArray(despesas) ? despesas : [],
+      receitas: Array.isArray(receitas) ? receitas : [],
+      categoryBudgets,
+      lastExpense,
+      salarioMensal: typeof salarioMensal !== 'undefined' ? salarioMensal : 0
+    });
+
+    window.__latestSpendAlerts = result;
+
+    // Evita spam: só notifica alertas novos desde a última avaliação
+    const seenKey = 'prisma_spend_alerts_seen_v1';
+    let seen = {};
+    try {
+      seen = JSON.parse(localStorage.getItem(seenKey) || '{}') || {};
+    } catch (_) {
+      seen = {};
+    }
+
+    const fresh = (result.alerts || []).filter((a) => a && a.id && !seen[a.id]);
+    if (notify && fresh.length) {
+      const top = fresh[0];
+      const msg = top.titulo + (top.mensagem ? ' — ' + top.mensagem : '');
+      try {
+        if (typeof showToast === 'function') showToast(msg.length > 120 ? msg.slice(0, 117) + '…' : msg);
+      } catch (_) { }
+      try {
+        if (window.PrismaNotify) {
+          window.PrismaNotify(
+            top.titulo || 'Alerta de gastos',
+            top.mensagem || 'Revise suas despesas do mês.',
+            top.prioridade === 'alta' ? 'danger' : 'warning'
+          );
+        } else if (window.PrismaNotifications && typeof window.PrismaNotifications.add === 'function') {
+          window.PrismaNotifications.add({
+            title: top.titulo || 'Alerta de gastos',
+            message: top.mensagem || '',
+            icon: top.icone || 'alert-triangle'
+          });
+        }
+      } catch (_) { }
+      // Marca os notificados como vistos
+      fresh.forEach((a) => { if (a.id) seen[a.id] = Date.now(); });
+      try {
+        // Mantém mapa enxuto (últimos 80)
+        const ids = Object.keys(seen);
+        if (ids.length > 80) {
+          ids.sort((a, b) => (seen[a] || 0) - (seen[b] || 0))
+            .slice(0, ids.length - 80)
+            .forEach((id) => { delete seen[id]; });
+        }
+        localStorage.setItem(seenKey, JSON.stringify(seen));
+      } catch (_) { }
+    }
+
+    // Atualiza lista do dashboard se existir
+    try {
+      const box = document.getElementById('dashAlerts');
+      const list = document.getElementById('dashAlertsList') || document.getElementById('alertsList');
+      if (list && result.alerts && result.alerts.length) {
+        const extra = result.alerts.slice(0, 4).map((a) => {
+          const prio = a.prioridade === 'alta' ? 'alert-high' : 'alert-mid';
+          return `<li class="dash-alert-item ${prio}" data-spend-alert="${a.id || ''}">
+            <span class="dash-alert-icon"><i data-lucide="${a.icone || 'alert-triangle'}"></i></span>
+            <div class="dash-alert-body"><strong>${a.titulo || 'Alerta'}</strong><span>${a.mensagem || ''}</span></div>
+          </li>`;
+        }).join('');
+        if (!list.dataset.spendAlertsInjected) {
+          list.insertAdjacentHTML('afterbegin', extra);
+          list.dataset.spendAlertsInjected = '1';
+        } else if (fresh.length) {
+          list.insertAdjacentHTML('afterbegin', extra);
+        }
+        if (box) box.hidden = false;
+        if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
+      }
+    } catch (_) { }
+
+    return result;
+  }
+  window.evaluateRealtimeSpendAlerts = evaluateRealtimeSpendAlerts;
+
   function recalculateAll() {
     receitas = Array.isArray(receitas) ? receitas : [];
     despesas = Array.isArray(despesas) ? despesas : [];
@@ -6150,46 +6673,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const need = (id) => !active || active === id || active === 'dashboard' || __sectionDirty[id];
 
     // KPI dashboard: barato e sempre atualizado (números no header do app)
-    try { updateDashboardCards(); } catch (_) {}
+    try { updateDashboardCards(); } catch (_) { }
     if (active === 'centro-financeiro' || __sectionDirty['centro-financeiro']) {
       try { updateCentroFinanceiro(); } catch (err) { console.warn('Centro financeiro:', err); }
       __sectionDirty['centro-financeiro'] = false;
     }
 
     // Listas: só re-render da seção ativa (ou se ainda dirty e usuário navegar depois)
-    if (need('receitas')) { try { renderReceitas(); } catch (_) {} __sectionDirty.receitas = false; }
-    if (need('despesas')) { try { renderDespesas(); } catch (_) {} __sectionDirty.despesas = false; }
-    if (need('contas')) { try { renderContas(); } catch (_) {} __sectionDirty.contas = false; }
-    if (need('cartoes')) { try { renderCartoes(); } catch (_) {} __sectionDirty.cartoes = false; }
+    if (need('receitas')) { try { renderReceitas(); } catch (_) { } __sectionDirty.receitas = false; }
+    if (need('despesas')) { try { renderDespesas(); } catch (_) { } __sectionDirty.despesas = false; }
+    if (need('contas')) { try { renderContas(); } catch (_) { } __sectionDirty.contas = false; }
+    if (need('cartoes')) { try { renderCartoes(); } catch (_) { } __sectionDirty.cartoes = false; }
     if (need('investimentos') || need('carteira-ativos')) {
-      try { renderInvestimentos(); } catch (_) {}
+      try { renderInvestimentos(); } catch (_) { }
       __sectionDirty.investimentos = false;
       __sectionDirty['carteira-ativos'] = false;
     }
-    if (need('metas')) { try { renderGoals(); } catch (_) {} __sectionDirty.metas = false; }
+    if (need('metas')) { try { renderGoals(); } catch (_) { } __sectionDirty.metas = false; }
 
     if (active === 'dashboard' || !active) {
-      try { renderDashboardTransactions(); } catch (_) {}
+      try { renderDashboardTransactions(); } catch (_) { }
       __sectionDirty.dashboard = false;
     }
 
     if (window.PrismaEnhancements && typeof window.PrismaEnhancements.updateDashboardEmpty === 'function') {
-      try { window.PrismaEnhancements.updateDashboardEmpty(); } catch (_) {}
+      try { window.PrismaEnhancements.updateDashboardEmpty(); } catch (_) { }
     }
     if (typeof updateCurrentProfileUI === 'function') {
-      try { updateCurrentProfileUI(); } catch (_) {}
+      try { updateCurrentProfileUI(); } catch (_) { }
     }
     // Perfis: só se a seção de dados estiver ativa (evita reflow pesado a cada lançamento)
     if (active === 'dados' && typeof renderProfiles === 'function') {
-      try { renderProfiles(); } catch (_) {}
+      try { renderProfiles(); } catch (_) { }
     }
 
     if (typeof refreshIcons === 'function') refreshIcons();
 
-    try { rebuildExpenseCategoriesFromData(); } catch (_) {}
-    try { rebuildIncomeCategoriesFromData(); } catch (_) {}
-    try { if (typeof updatePieChart === 'function') updatePieChart(); } catch (_) {}
-    try { if (typeof updateIncomePieChart === 'function') updateIncomePieChart(); } catch (_) {}
+    try { rebuildExpenseCategoriesFromData(); } catch (_) { }
+    try { rebuildIncomeCategoriesFromData(); } catch (_) { }
+    try { if (typeof updatePieChart === 'function') updatePieChart(); } catch (_) { }
+    try { if (typeof updateIncomePieChart === 'function') updateIncomePieChart(); } catch (_) { }
   }
 
   // Ao trocar de seção, materializa renders adiados (dirty)
@@ -6226,12 +6749,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
 
-
-  function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
-    }[char]));
-  }
 
   function formatPercent(value, digits = 0) {
     if (!Number.isFinite(value)) return '0%';
@@ -6605,7 +7122,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('submitDespesaBtn').textContent = 'Adicionar Despesa';
       document.getElementById('despesaEditIndex').value = '';
       if (despesaForm) despesaForm.reset();
-      
+
       // Definir prioridade padrão como "media"
       if (despesaPrioridade) despesaPrioridade.value = 'media';
       if (despesaFormaPagamento) despesaFormaPagamento.value = 'pix';
@@ -6678,6 +7195,15 @@ document.addEventListener('DOMContentLoaded', () => {
       saveDataStorage(STORAGE_KEYS.despesas, despesas);
       closeModal(despesaModal, despesaForm);
       recalculateAll();
+
+      // Alertas de gastos em tempo real (após cada lançamento/edição)
+      try {
+        if (typeof evaluateRealtimeSpendAlerts === 'function') {
+          evaluateRealtimeSpendAlerts({ lastExpense: item, notify: true });
+        }
+      } catch (err) {
+        console.warn('[SpendAlerts]', err);
+      }
 
       // Educação contextual: somente após um novo lançamento, sem bloquear o usuário.
       if (isNewExpense) {
@@ -7645,7 +8171,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Record in transfer history (separate from receitas/despesas)
       if (!Array.isArray(window._prismaTransferencias)) window._prismaTransferencias = [];
-      try { window._prismaTransferencias = JSON.parse(localStorage.getItem(getScopedStorageKey('prisma_transferencias')) || '[]'); } catch (_) {}
+      try { window._prismaTransferencias = JSON.parse(localStorage.getItem(getScopedStorageKey('prisma_transferencias')) || '[]'); } catch (_) { }
       window._prismaTransferencias.unshift({
         id: Date.now(),
         origemNome: contas[origemIdx].nome || contas[origemIdx].banco,
@@ -7870,7 +8396,7 @@ document.addEventListener('DOMContentLoaded', () => {
     svg.appendChild(gradient);
 
     const area = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    area.setAttribute('d', `${path} L ${coords[coords.length-1][0]},${height} L ${coords[0][0]},${height} Z`);
+    area.setAttribute('d', `${path} L ${coords[coords.length - 1][0]},${height} L ${coords[0][0]},${height} Z`);
     area.setAttribute('fill', `url(#${gradient.id})`);
     svg.appendChild(area);
 
@@ -7919,35 +8445,45 @@ document.addEventListener('DOMContentLoaded', () => {
   function initCashflowChart() {
     const oldCanvas = document.getElementById('cashflowChart');
     if (!oldCanvas) return;
-    
+
+    // Sempre sincroniza labels e séries com os 12 meses em ordem cronológica
+    const flow = getLast12Months();
+    months = flow.short;
+    if (!Array.isArray(incomeData) || incomeData.length !== 12) {
+      incomeData = Array(12).fill(0).map((_, i) => Number(incomeData?.[i]) || 0);
+    }
+    if (!Array.isArray(expenseData) || expenseData.length !== 12) {
+      expenseData = Array(12).fill(0).map((_, i) => Number(expenseData?.[i]) || 0);
+    }
+
     // Carregar Chart.js sob demanda
     if (!window.Chart) {
       console.warn('Chart.js não está disponível. O gráfico de fluxo será exibido quando a biblioteca estiver carregada.');
       return;
     }
-    
+
     let canvas = oldCanvas;
-    
-    // Se houver instância anterior, tentar destruir
-    if (cashflowChart) {
-      if (typeof cashflowChart.destroy === 'function') {
-        try {
-          cashflowChart.destroy();
-        } catch (e) {
-          // Se falhar, recriar o canvas inteiro
-          console.warn('Canvas reuse issue detected. Recreating canvas element...');
-          const container = oldCanvas.parentElement;
+
+    // Preferência: atualizar dados sem destruir (performance)
+    if (cashflowChart && cashflowChart.data && cashflowChart.data.datasets && cashflowChart.data.datasets.length >= 2) {
+      if (prismaUpdateChartData(cashflowChart, months, [incomeData, expenseData])) {
+        return;
+      }
+      cashflowChart = prismaSafeDestroyChart(cashflowChart);
+    } else if (cashflowChart) {
+      cashflowChart = prismaSafeDestroyChart(cashflowChart);
+      try {
+        const container = oldCanvas.parentElement;
+        if (container) {
           const newCanvas = document.createElement('canvas');
           newCanvas.id = 'cashflowChart';
-          newCanvas.width = 860;
-          newCanvas.height = 350;
           container.innerHTML = '';
           container.appendChild(newCanvas);
           canvas = newCanvas;
         }
-      }
+      } catch (_) { }
     }
-    
+
     const ctx = canvas.getContext('2d');
     cashflowChart = new window.Chart(ctx, {
       type: 'line',
@@ -7960,10 +8496,10 @@ document.addEventListener('DOMContentLoaded', () => {
             borderColor: '#22c55e',
             backgroundColor: createGradient(ctx, 280, 'rgba(0,255,136,0)', 'rgba(0,255,136,0.15)'),
             fill: true,
-            tension: 0.4,
-            borderWidth: 2.5,
+            tension: 0.35,
+            borderWidth: 2.2,
             pointRadius: 0,
-            pointHoverRadius: 6,
+            pointHoverRadius: 5,
             pointBackgroundColor: '#00FF88',
             pointBorderColor: '#0F172A',
             pointBorderWidth: 2,
@@ -7974,44 +8510,28 @@ document.addEventListener('DOMContentLoaded', () => {
             borderColor: '#FF5470',
             backgroundColor: createGradient(ctx, 280, 'rgba(255,84,112,0)', 'rgba(255,84,112,0.12)'),
             fill: true,
-            tension: 0.4,
-            borderWidth: 2.5,
+            tension: 0.35,
+            borderWidth: 2.2,
             pointRadius: 0,
-            pointHoverRadius: 6,
+            pointHoverRadius: 5,
             pointBackgroundColor: '#FF5470',
             pointBorderColor: '#0F172A',
             pointBorderWidth: 2,
           },
         ],
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: { duration: 1200, easing: 'easeOutQuart' },
-        interaction: { mode: 'index', intersect: false },
+      options: prismaInteractiveLineOpts({
         plugins: {
           legend: { display: false },
-          tooltip: {
-            backgroundColor: 'rgba(15,23,42,0.95)',
-            borderColor: 'rgba(0,255,136,0.3)',
-            borderWidth: 1,
+          tooltip: prismaTooltipBRL({
+            borderColor: 'rgba(0,255,136,0.35)',
             titleColor: '#E6EDF7',
-            bodyColor: '#94A3B8',
-            padding: 12,
-            cornerRadius: 10,
-            displayColors: true,
-          },
-        },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: '#64748B', maxRotation: 0 }, border: { display: false } },
-          y: {
-            grid: { color: 'rgba(148,163,184,0.08)' },
-            ticks: { color: '#64748B', callback: (v) => 'R$' + (v / 1000).toFixed(1) + 'k' },
-            border: { display: false },
-          },
-        },
-      },
+            bodyColor: '#94A3B8'
+          })
+        }
+      }),
     });
+    prismaBindResetZoom(cashflowChart, canvas);
   }
 
   function initPieChart() {
@@ -8064,24 +8584,13 @@ document.addEventListener('DOMContentLoaded', () => {
         responsive: true,
         maintainAspectRatio: false,
         cutout: '70%',
-        animation: { animateRotate: true, duration: 1000 },
+        animation: { animateRotate: true, duration: 400 },
         plugins: {
           legend: { display: false },
-          tooltip: {
+          tooltip: prismaTooltipPieBRL(total, {
             enabled: hasData,
-            backgroundColor: 'rgba(15,23,42,0.95)',
-            borderColor: 'rgba(0,200,255,0.3)',
-            borderWidth: 1,
-            padding: 10,
-            cornerRadius: 8,
-            callbacks: {
-              label: (ctx) => {
-                if (!hasData) return ' Sem despesas cadastradas';
-                const pct = total > 0 ? (ctx.raw / total) * 100 : 0;
-                return ` ${ctx.label}: ${fmtMoney(ctx.raw)} (${formatPiePercent(pct)})`;
-              },
-            },
-          },
+            borderColor: 'rgba(0,200,255,0.3)'
+          }),
         },
       },
     });
@@ -8111,7 +8620,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function updatePieChart() {
     rebuildExpenseCategoriesFromData();
     if (!pieChart) {
-      try { initPieChart(); } catch (_) {}
+      try { initPieChart(); } catch (_) { }
       return;
     }
     const total = categories.reduce((s, c) => s + c.value, 0);
@@ -8169,7 +8678,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (item[f] && String(item[f]).trim()) { name = String(item[f]).trim(); break; }
       }
       if (!name) name = 'Outros';
-        const val = parseMoneyInput(item.valor);
+      const val = parseMoneyInput(item.valor);
       if (val <= 0) return;
       map[name] = (map[name] || 0) + val;
     });
@@ -8180,7 +8689,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function rebuildExpenseCategoriesFromData() {
     categories = aggregateByCategory(despesas, ['categoria', 'origem']);
-    try { saveDataStorage(STORAGE_KEYS.categories, categories); } catch (_) {}
+    try { saveDataStorage(STORAGE_KEYS.categories, categories); } catch (_) { }
     return categories;
   }
 
@@ -8237,24 +8746,13 @@ document.addEventListener('DOMContentLoaded', () => {
         responsive: true,
         maintainAspectRatio: false,
         cutout: '70%',
-        animation: { animateRotate: true, duration: 1000 },
+        animation: { animateRotate: true, duration: 400 },
         plugins: {
           legend: { display: false },
-          tooltip: {
+          tooltip: prismaTooltipPieBRL(total, {
             enabled: hasData,
-            backgroundColor: 'rgba(15,23,42,0.95)',
-            borderColor: 'rgba(0,200,255,0.3)',
-            borderWidth: 1,
-            padding: 10,
-            cornerRadius: 8,
-            callbacks: {
-              label: (ctx) => {
-                if (!hasData) return ' Sem receitas cadastradas';
-                const pct = total > 0 ? (ctx.raw / total) * 100 : 0;
-                return ` ${ctx.label}: ${fmtMoney(ctx.raw)} (${formatPiePercent(pct)})`;
-              },
-            },
-          },
+            borderColor: 'rgba(0,200,255,0.3)'
+          }),
         },
       },
     });
@@ -8284,7 +8782,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateIncomePieChart() {
     rebuildIncomeCategoriesFromData();
     if (!incomePieChart) {
-      try { initIncomePieChart(); } catch (_) {}
+      try { initIncomePieChart(); } catch (_) { }
       return;
     }
     const total = incomeCategories.reduce((s, c) => s + c.value, 0);
@@ -8325,17 +8823,27 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function initReportChart() {
+    // Sempre usa a sequência completa de 12 meses em ordem cronológica
+    const flow = getLast12Months();
+    months = flow.short;
+    // Alinha dados caso arrays estejam incompletos
+    if (!Array.isArray(incomeData) || incomeData.length !== 12) {
+      incomeData = Array(12).fill(0).map((_, i) => Number(incomeData?.[i]) || 0);
+    }
+    if (!Array.isArray(expenseData) || expenseData.length !== 12) {
+      expenseData = Array(12).fill(0).map((_, i) => Number(expenseData?.[i]) || 0);
+    }
     const oldCanvas = document.getElementById('reportChart');
     if (!oldCanvas) return;
-    
+
     // Carregar Chart.js sob demanda
     if (!window.Chart) {
       console.warn('Chart.js não está disponível. O gráfico de relatório será exibido quando a biblioteca estiver carregada.');
       return;
     }
-    
+
     let canvas = oldCanvas;
-    
+
     // Se houver instância anterior, tentar destruir
     if (reportChart) {
       if (typeof reportChart.destroy === 'function') {
@@ -8355,45 +8863,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     }
-    
+
     const ctx = canvas.getContext('2d');
-    const reportSeries = getMonthlyReportSeries();
     reportChart = new window.Chart(ctx, {
       type: 'bar',
       data: {
-        labels: reportSeries.labels,
+        labels: months,
         datasets: [
           {
             label: 'Receitas',
-            data: reportSeries.income,
+            data: incomeData,
             backgroundColor: createGradient(ctx, 340, 'rgba(0,255,136,0.15)', 'rgba(0,255,136,0.7)'),
             borderRadius: 6,
             borderSkipped: false,
           },
           {
             label: 'Despesas',
-            data: reportSeries.expenses,
+            data: expenseData,
             backgroundColor: createGradient(ctx, 340, 'rgba(255,84,112,0.15)', 'rgba(255,84,112,0.7)'),
             borderRadius: 6,
             borderSkipped: false,
           },
         ],
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: { duration: 1200 },
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: '#64748B' }, border: { display: false } },
-          y: {
-            grid: { color: 'rgba(148,163,184,0.08)' },
-            ticks: { color: '#64748B', callback: (v) => 'R$' + (v / 1000).toFixed(1) + 'k' },
-            border: { display: false },
-          },
-        },
-      },
+      options: prismaInteractiveLineOpts({
+        plugins: {
+          legend: { display: false },
+          tooltip: prismaTooltipBRL()
+        }
+      }),
     });
+    prismaBindResetZoom(reportChart, canvas);
   }
 
   const rangeSelect = document.querySelector('.range-select');
@@ -8409,11 +8909,11 @@ document.addEventListener('DOMContentLoaded', () => {
         exp = expenseData.slice(-6);
       } else if (val.includes('30 dias')) {
         const now = new Date();
-        const bins = Array.from({length:5},(_,i)=>({inc:0,exp:0,label:`${i*6+1}–${Math.min((i+1)*6,30)} dias`}));
-        const addToBin=(date,value,key)=>{ if(!date) return; const d=new Date(String(date).includes('T')?date:`${date}T00:00:00`); if(Number.isNaN(d.getTime())) return; const diff=Math.floor((new Date(now.getFullYear(),now.getMonth(),now.getDate())-new Date(d.getFullYear(),d.getMonth(),d.getDate()))/86400000); if(diff<0||diff>=30) return; const idx=Math.min(4,Math.floor(diff/6)); bins[4-idx][key]+=Number(value)||0; };
-        receitas.forEach(r=>addToBin(r.data,r.valor,'inc'));
-        despesas.forEach(d=>addToBin(d.data,d.valor,'exp'));
-        labels=bins.map(b=>b.label); inc=bins.map(b=>b.inc); exp=bins.map(b=>b.exp);
+        const bins = Array.from({ length: 5 }, (_, i) => ({ inc: 0, exp: 0, label: `${i * 6 + 1}–${Math.min((i + 1) * 6, 30)} dias` }));
+        const addToBin = (date, value, key) => { if (!date) return; const d = new Date(String(date).includes('T') ? date : `${date}T00:00:00`); if (Number.isNaN(d.getTime())) return; const diff = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000); if (diff < 0 || diff >= 30) return; const idx = Math.min(4, Math.floor(diff / 6)); bins[4 - idx][key] += Number(value) || 0; };
+        receitas.forEach(r => addToBin(r.data, r.valor, 'inc'));
+        despesas.forEach(d => addToBin(d.data, d.valor, 'exp'));
+        labels = bins.map(b => b.label); inc = bins.map(b => b.inc); exp = bins.map(b => b.exp);
       }
       if (cashflowChart) {
         cashflowChart.data.labels = labels;
@@ -8447,7 +8947,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==================== PROFILE MANAGEMENT ====================
   // `profiles` and `currentProfileId` já foram inicializados acima.
-  
+
   // Configurar chaves de storage baseadas no perfil atual
   if (currentProfileId) {
     STORAGE_KEYS = getProfileStorageKeys(currentProfileId);
@@ -8498,42 +8998,42 @@ document.addEventListener('DOMContentLoaded', () => {
   // Renderizar lista de perfis
   function renderProfiles() {
     if (!profilesGrid) return;
-    
+
     profilesGrid.innerHTML = '';
-    
+
     if (profiles.length === 0) {
       profilesGrid.style.display = 'none';
       if (profilesEmptyState) profilesEmptyState.style.display = 'block';
       if (profileCount) profileCount.textContent = '0 perfis';
       return;
     }
-    
+
     profilesGrid.style.display = 'grid';
     if (profilesEmptyState) profilesEmptyState.style.display = 'none';
     if (profileCount) profileCount.textContent = `${profiles.length} perfil${profiles.length !== 1 ? 's' : ''}`;
-    
+
     // Calcular valores dinâmicos para o perfil atual
     const dynamicReceitas = receitas.reduce((sum, r) => sum + parseMoneyInput(r.valor), 0);
     const dynamicDespesas = despesas.reduce((sum, d) => sum + parseMoneyInput(d.valor), 0);
     const dynamicSaldo = dynamicReceitas - dynamicDespesas;
-    
+
     profiles.forEach(profile => {
       // Se for o perfil atual, usar valores dinâmicos calculados
       let displaySaldo = profile.saldo || 0;
       let displayReceitas = profile.salario || 0;
       let displayDespesas = profile.despesas || 0;
-      
+
       if (profile.id === currentProfileId) {
         displaySaldo = dynamicSaldo;
         displayReceitas = dynamicReceitas;
         displayDespesas = dynamicDespesas;
-        
+
         // Atualizar o perfil com os valores calculados
         profile.saldo = dynamicSaldo;
         profile.salario = dynamicReceitas;
         profile.despesas = dynamicDespesas;
       }
-      
+
       const card = document.createElement('div');
       card.className = `profile-card${profile.id === currentProfileId ? ' active' : ''}`;
       card.innerHTML = `
@@ -8578,10 +9078,10 @@ document.addEventListener('DOMContentLoaded', () => {
           </button>
         </div>
       `;
-      
+
       profilesGrid.appendChild(card);
     });
-    
+
     // Salvar perfis atualizados
     saveProfiles();
     refreshIcons();
@@ -8595,7 +9095,7 @@ document.addEventListener('DOMContentLoaded', () => {
       updateCurrentProfileUI();
       return;
     }
-    
+
     currentProfile = getProfileById(currentProfileId);
     updateCurrentProfileUI();
   }
@@ -8608,12 +9108,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentProfileBalance = document.getElementById('currentProfileBalance');
     const currentProfileIncome = document.getElementById('currentProfileIncome');
     const currentProfileExpenses = document.getElementById('currentProfileExpenses');
-    
+
     // Calcular valores dinâmicos baseados nas transações atuais
     const dynamicReceitas = receitas.reduce((sum, r) => sum + parseMoneyInput(r.valor), 0);
     const dynamicDespesas = despesas.reduce((sum, d) => sum + parseMoneyInput(d.valor), 0);
     const dynamicSaldo = dynamicReceitas - dynamicDespesas;
-    
+
     if (currentProfile) {
       if (currentProfileName) currentProfileName.textContent = currentProfile.name;
       if (currentProfileEmail) currentProfileEmail.textContent = currentProfile.email;
@@ -8623,7 +9123,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (currentProfileBalance) currentProfileBalance.textContent = formatCurrency(dynamicSaldo);
       if (currentProfileIncome) currentProfileIncome.textContent = formatCurrency(dynamicReceitas);
       if (currentProfileExpenses) currentProfileExpenses.textContent = formatCurrency(dynamicDespesas);
-      
+
       // Atualizar o perfil com os valores calculados
       currentProfile.saldo = dynamicSaldo;
       currentProfile.salario = dynamicReceitas;
@@ -8638,7 +9138,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (currentProfileIncome) currentProfileIncome.textContent = 'R$ 0,00';
       if (currentProfileExpenses) currentProfileExpenses.textContent = 'R$ 0,00';
     }
-    
+
     // Update dropdown as well
     updateProfileDropdown();
     if (typeof syncAuthenticatedUserUI === 'function') syncAuthenticatedUserUI();
@@ -8660,7 +9160,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function editProfile(profileId) {
     const profile = getProfileById(profileId);
     if (!profile) return;
-    
+
     if (profileModalTitle) profileModalTitle.textContent = 'Editar Perfil';
     if (document.getElementById('profileId')) document.getElementById('profileId').value = profile.id;
     if (document.getElementById('profileName')) document.getElementById('profileName').value = profile.name;
@@ -8669,13 +9169,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (profileDoc) profileDoc.value = profile.doc;
     if (document.getElementById('profileSaldo')) document.getElementById('profileSaldo').value = profile.saldo || 0;
     if (document.getElementById('profileSalario')) document.getElementById('profileSalario').value = profile.salario || 0;
-    
+
     // Não mostrar campos de senha ao editar
     if (document.getElementById('profilePassword')) document.getElementById('profilePassword').value = '';
     if (document.getElementById('profileConfirmPassword')) document.getElementById('profileConfirmPassword').value = '';
     if (document.getElementById('profilePassword')) document.getElementById('profilePassword').required = false;
     if (document.getElementById('profileConfirmPassword')) document.getElementById('profileConfirmPassword').required = false;
-    
+
     updateProfileFields();
     if (profileModal) profileModal.classList.add('active');
   }
@@ -8700,20 +9200,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmPassword = document.getElementById('profileConfirmPassword').value;
     const saldo = parseMoneyInput(document.getElementById('profileSaldo').value) || 0;
     const salario = parseMoneyInput(document.getElementById('profileSalario').value) || 0;
-    
+
     // Validação
     if (!name || !email || !doc) {
       showToast('Preencha todos os campos obrigatórios.');
       return;
     }
-    
+
     // Validar email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       showToast('E-mail inválido.');
       return;
     }
-    
+
     // Se é novo perfil, validar senha
     if (!profileId && !firebaseAuthenticated) {
       if (!password || !confirmPassword) {
@@ -8729,21 +9229,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
     }
-    
+
     // Verificar email duplicado
     const emailExists = profiles.some(p => p.email === email && p.id !== profileId);
     if (emailExists) {
       showToast('Este e-mail já está cadastrado.');
       return;
     }
-    
+
     // Verificar nome duplicado
     const nameExists = profiles.some(p => p.name === name && p.id !== profileId);
     if (nameExists) {
       showToast('Este nome já está cadastrado. Use um nome diferente.');
       return;
     }
-    
+
     // Verificar senha duplicado (apenas para novos perfis)
     if (!profileId && !firebaseAuthenticated && password) {
       const passwordExists = profiles.some(p => p.password === password);
@@ -8752,7 +9252,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
     }
-    
+
     if (profileId) {
       // Editar perfil existente
       const index = profiles.findIndex(p => p.id === profileId);
@@ -8803,15 +9303,15 @@ document.addEventListener('DOMContentLoaded', () => {
         createdAt: new Date().toISOString()
       };
       profiles.push(newProfile);
-      
+
       // Se é o primeiro perfil, definir como atual
       if (profiles.length === 1) {
         saveCurrentProfileId(newProfile.id);
         currentProfileId = newProfile.id;
-        
+
         // Configurar chaves de storage para o novo perfil
         STORAGE_KEYS = getProfileStorageKeys(newProfile.id);
-        
+
         // Inicializar dados vazios para o novo perfil
         receitas = [];
         despesas = [];
@@ -8827,21 +9327,21 @@ document.addEventListener('DOMContentLoaded', () => {
         incomeData = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expenseData = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         categories = [];
-        
+
         // Salvar dados iniciais vazios para o novo perfil
         saveCurrentProfileData();
       }
-      
+
       showToast('Perfil criado com sucesso!');
     }
-    
+
     saveProfiles();
     if (firebaseAuthenticated) scheduleServerSync();
     renderProfiles();
     renderCurrentProfile();
     if (typeof syncAuthenticatedUserUI === 'function') syncAuthenticatedUserUI();
     closeProfileModalHandler();
-    
+
     // Atualizar lista de perfis existentes no modal de cadastro
     updateExistingProfilesList();
   }
@@ -8855,36 +9355,36 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.values(STORAGE_KEYS).forEach(key => {
           localStorage.removeItem(key);
         });
-        
+
         // Remover o perfil da lista de perfis
         profiles = profiles.filter(p => p.id !== currentProfileId);
         setJSONToStorage(BASE_STORAGE_KEYS.profiles, profiles);
-        
+
         // Limpar ID do perfil atual
         localStorage.removeItem(BASE_STORAGE_KEYS.currentProfileId);
-        
+
         // Limpar dados globais
         localStorage.removeItem(getScopedStorageKey('prisma_recomendacoes_aplicadas', profileId));
-            
+
         // Recarregar a página para voltar à tela de cadastro
         location.reload();
       }
       return;
     }
-    
+
     if (confirm('Tem certeza que deseja excluir este perfil? Esta ação não pode ser desfeita.')) {
       // Remover dados específicos do perfil
       const profileKeys = getProfileStorageKeys(profileId);
       Object.values(profileKeys).forEach(key => {
         localStorage.removeItem(key);
       });
-      
+
       // Remover o perfil da lista
       profiles = profiles.filter(p => p.id !== profileId);
       saveProfiles();
       renderProfiles();
       showToast('Perfil excluído com sucesso.');
-      
+
       // Atualizar lista de perfis existentes no modal de cadastro
       updateExistingProfilesList();
     }
@@ -8893,23 +9393,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // Alternar para perfil
   function switchProfile(profileId) {
     if (profileId === currentProfileId) return;
-    
+
     const profile = getProfileById(profileId);
     if (!profile) return;
-    
+
     // Salvar dados do perfil atual antes de alternar
     if (!saveCurrentProfileData()) {
       showToast('Não foi possível salvar os dados locais. A troca de perfil foi cancelada.', 'warning');
       return;
     }
-    
+
     // Atualizar ID do perfil atual
     saveCurrentProfileId(profileId);
     currentProfileId = profileId;
-    
+
     // Carregar dados do novo perfil
     loadProfileData(profileId);
-    
+
     // Atualizar interface
     renderProfiles();
     renderCurrentProfile();
@@ -9020,35 +9520,35 @@ document.addEventListener('DOMContentLoaded', () => {
     switchAccountBtn.addEventListener('click', () => {
       // Filtrar perfis diferentes do atual
       const otherProfiles = profiles.filter(p => p.id !== currentProfileId);
-      
+
       if (otherProfiles.length === 0) {
         showToast('Não há outras contas disponíveis para alternar.');
         return;
       }
-      
+
       // Criar um prompt simples para selecionar a conta
       let message = 'Selecione a conta para alternar:\n\n';
       otherProfiles.forEach((profile, index) => {
         message += `${index + 1}. ${profile.name} (${profile.email})\n`;
       });
       message += '\nDigite o número da conta desejada:';
-      
+
       const selection = prompt(message);
-      
+
       if (selection === null) {
         // Usuário cancelou
         return;
       }
-      
+
       const selectedIndex = parseInt(selection) - 1;
-      
+
       if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= otherProfiles.length) {
         showToast('Seleção inválida. Tente novamente.');
         return;
       }
-      
+
       const selectedProfile = otherProfiles[selectedIndex];
-      
+
       // Usar a função atualizada de switchProfile que já inclui salvamento e carregamento de dados
       switchProfile(selectedProfile.id);
     });
@@ -9139,7 +9639,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (currentProfileId) {
     loadProfileData(currentProfileId);
   }
-  
+
   renderProfiles();
   renderCurrentProfile();
 
@@ -9179,7 +9679,7 @@ document.addEventListener('DOMContentLoaded', () => {
         resolve();
         return;
       }
-      
+
       const script = document.createElement('script');
       script.src = src;
       script.onload = resolve;
@@ -9278,7 +9778,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = () => resolve(null);
-        try { img.crossOrigin = 'anonymous'; } catch (_) {}
+        try { img.crossOrigin = 'anonymous'; } catch (_) { }
         // Versão estável: permite cache HTTP do browser/CDN (server envia max-age longo em .png)
         const ver = '20260911';
         img.src = src + (src.indexOf('?') >= 0 ? '&' : '?') + 'v=' + ver;
@@ -9458,7 +9958,17 @@ document.addEventListener('DOMContentLoaded', () => {
       pdf.setTextColor(100, 116, 139);
       pdf.text('Prisma – Gestão Financeira Inteligente', margin, pageHeight - 22);
       pdf.setTextColor(148, 163, 184);
-      pdf.text(disclaimer, margin, pageHeight - 12);
+      const discLines = pdf.splitTextToSize(String(disclaimer || ''), Math.max(80, pageWidth - margin * 2 - 90));
+      const dArr = Array.isArray(discLines) ? discLines : [String(discLines)];
+      // no máximo 2 linhas no rodapé, truncando o restante
+      const dShow = dArr.slice(0, 2);
+      if (dArr.length > 2) {
+        const last = dShow[dShow.length - 1] || '';
+        dShow[dShow.length - 1] = last.length > 3 ? last.slice(0, Math.max(0, last.length - 1)) + '…' : last + '…';
+      }
+      dShow.forEach((ln, idx) => {
+        pdf.text(String(ln), margin, pageHeight - 12 - (dShow.length - 1 - idx) * 9);
+      });
       pdf.setTextColor(100, 116, 139);
       pdf.text(`Página ${i} de ${total}`, pageWidth - margin, pageHeight - 22, { align: 'right' });
     }
@@ -9476,6 +9986,25 @@ document.addEventListener('DOMContentLoaded', () => {
     return y + 16;
   }
 
+  /** Garante espaço vertical; se não couber, nova página + cabeçalho. Evita sobreposição. */
+  function pdfEnsureSpace(pdf, y, needed, ctx) {
+    const pageH = pdf.internal.pageSize.getHeight();
+    const bottom = 56;
+    if (y + needed <= pageH - bottom) return y;
+    pdf.addPage();
+    const margin = (ctx && ctx.margin) || 40;
+    const logoData = ctx && ctx.logoData;
+    const title = (ctx && ctx.title) || 'Prisma';
+    const subtitle = (ctx && ctx.subtitle) || 'Relatório Financeiro';
+    return drawPrismaHeader(pdf, {
+      margin,
+      logoData,
+      title,
+      subtitle,
+      showProfile: false
+    }) + 14;
+  }
+
   function pdfTruncate(pdf, value, maxWidth) {
     const text = String(value ?? '');
     if (!text || !Number.isFinite(maxWidth) || maxWidth <= 0) return '';
@@ -9486,6 +10015,44 @@ document.addEventListener('DOMContentLoaded', () => {
       truncated = truncated.slice(0, -1);
     }
     return `${truncated}…`;
+  }
+
+  /**
+   * Escreve texto multilinha SEMPRE dentro da largura útil e respeitando
+   * o rodapé da página (nova página automática quando necessário).
+   * Retorna o novo Y após o bloco.
+   */
+  function pdfWriteLines(pdf, rawText, x, y, maxWidth, opts) {
+    const options = opts || {};
+    const lineHeight = options.lineHeight || 13;
+    const ctx = options.ctx || null;
+    const align = options.align || 'left';
+    const fontSize = options.fontSize;
+    const fontStyle = options.fontStyle;
+    const color = options.color;
+    if (fontStyle) pdf.setFont('helvetica', fontStyle);
+    if (fontSize) pdf.setFontSize(fontSize);
+    if (Array.isArray(color) && color.length >= 3) {
+      pdf.setTextColor(color[0], color[1], color[2]);
+    }
+    const safeWidth = Math.max(40, Number(maxWidth) || 0);
+    const text = String(rawText == null ? '' : rawText);
+    if (!text) return y;
+    const lines = pdf.splitTextToSize(text, safeWidth);
+    const arr = Array.isArray(lines) ? lines : [String(lines)];
+    for (let i = 0; i < arr.length; i++) {
+      y = pdfEnsureSpace(pdf, y, lineHeight + 2, ctx);
+      const line = String(arr[i] ?? '');
+      if (align === 'right') {
+        pdf.text(line, x, y, { align: 'right' });
+      } else if (align === 'center') {
+        pdf.text(line, x, y, { align: 'center' });
+      } else {
+        pdf.text(line, x, y);
+      }
+      y += lineHeight;
+    }
+    return y;
   }
 
   function pdfDrawKpiRow(pdf, items, margin, y, contentWidth) {
@@ -9516,93 +10083,446 @@ document.addEventListener('DOMContentLoaded', () => {
     return y + boxH + 16;
   }
 
+  // Fluxo mensal em ordem cronológica (sempre 12 meses: mais antigo → mês atual).
+  function getMonthlyFlowForPdf() {
+    const { keys, short } = getLast12Months();
+    // Garante arrays de comprimento 12 alinhados à janela atual
+    const inc = Array(12).fill(0).map((_, i) => Number(Array.isArray(incomeData) ? incomeData[i] : 0) || 0);
+    const exp = Array(12).fill(0).map((_, i) => Number(Array.isArray(expenseData) ? expenseData[i] : 0) || 0);
+    return keys.map((key, i) => {
+      const receita = Math.round(inc[i] * 100) / 100;
+      const despesa = Math.round(exp[i] * 100) / 100;
+      return {
+        key,
+        label: short[i],
+        inc: receita,
+        exp: despesa,
+        saldo: Math.round((receita - despesa) * 100) / 100
+      };
+    });
+  }
+
   // ==================== END PDF HELPERS ====================
 
 
+  /** Libera o event loop entre etapas pesadas do PDF (evita UI congelada). */
+  function prismaYield(ms = 0) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async function generatePDF() {
+    if (typeof _prismaExportBusy !== 'undefined' && _prismaExportBusy) {
+      showToast('Aguarde: exportação em andamento...');
+      return;
+    }
+    if (typeof _prismaExportBusy !== 'undefined') _prismaExportBusy = true;
     try {
-      showToast('Carregando bibliotecas de PDF... Aguarde um momento.');
+      showToast('Carregando bibliotecas de PDF...');
+      await prismaYield(16);
       const JsPDF = await ensurePdfLibrary();
+      await prismaYield(8);
       const logoData = await loadPrismaLogoForPDF();
       const pdf = new JsPDF('p', 'pt', 'a4');
 
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const margin = 40;
-    const contentWidth = pageWidth - margin * 2;
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const margin = 40;
+      const contentWidth = pageWidth - margin * 2;
 
-    let y = drawPrismaHeader(pdf, {
-      margin,
-      logoData,
-      title: 'Prisma',
-      subtitle: 'Relatório Financeiro — Gestão Inteligente',
-      showProfile: true
-    });
-    y += 14;
+      showToast('Montando relatório PDF...');
+      await prismaYield(8);
 
-    // Financial Summary
-    y = pdfSectionTitle(pdf, 'Resumo Financeiro', margin, y);
+      let y = drawPrismaHeader(pdf, {
+        margin,
+        logoData,
+        title: 'Prisma',
+        subtitle: 'Relatório Financeiro — Gestão Inteligente',
+        showProfile: true
+      });
+      y += 14;
 
-    const isDebtSituation = receitasMes < despesasMes;
-    const summary = [
-      { label: 'Salário Mensal', value: fmtMoney(salarioMensal), color: [0, 180, 220] },
-      { label: 'Saldo Atual', value: fmtMoney(saldoAtual), color: saldoAtual >= 0 ? [0, 200, 120] : [255, 84, 112] },
-      { label: 'Receitas do Mês', value: fmtMoney(receitasMes), color: [0, 180, 220] },
-      { label: 'Despesas do Mês', value: fmtMoney(despesasMes), color: [255, 84, 112] },
-      { label: isDebtSituation ? 'Dívida' : 'Economia', value: fmtMoney(Math.abs(economiaMes)), color: isDebtSituation ? [255, 84, 112] : [124, 77, 255] },
-    ];
-    y = pdfDrawKpiRow(pdf, summary, margin, y, contentWidth);
+      // Financial Summary
+      y = pdfSectionTitle(pdf, 'Resumo Financeiro', margin, y);
 
-    // Report Chart
-    if (reportChart && typeof reportChart.toBase64Image === 'function') {
-      y = pdfSectionTitle(pdf, 'Resumo por Período', margin, y);
-      y += 6;
+      const flowRows = getMonthlyFlowForPdf();
+      const mesAtual = flowRows[flowRows.length - 1];
+      const isDebtSituation = mesAtual.inc < mesAtual.exp;
+      const summary = [
+        { label: 'Salário Mensal', value: fmtMoney(salarioMensal), color: [0, 180, 220] },
+        { label: 'Saldo Atual', value: fmtMoney(saldoAtual), color: saldoAtual >= 0 ? [0, 200, 120] : [255, 84, 112] },
+        { label: `Receitas (${mesAtual.label})`, value: fmtMoney(mesAtual.inc), color: [0, 180, 220] },
+        { label: `Despesas (${mesAtual.label})`, value: fmtMoney(mesAtual.exp), color: [255, 84, 112] },
+        { label: isDebtSituation ? 'Dívida do mês' : 'Economia do mês', value: fmtMoney(Math.abs(mesAtual.saldo)), color: isDebtSituation ? [255, 84, 112] : [124, 77, 255] },
+      ];
+      y = pdfDrawKpiRow(pdf, summary, margin, y, contentWidth);
 
-      try {
-        const chartImg = reportChart.toBase64Image('image/png', 1);
-        const chartWidth = contentWidth;
-        const chartHeight = 160;
+      // Report Chart
+      if (reportChart && reportChart.data && Array.isArray(reportChart.data.datasets) && reportChart.data.datasets.length >= 2) {
+        try {
+          reportChart.data.labels = flowRows.map((r) => r.label);
+          reportChart.data.datasets[0].data = flowRows.map((r) => r.inc);
+          reportChart.data.datasets[1].data = flowRows.map((r) => r.exp);
+          reportChart.update('none');
+        } catch (_) { }
+      }
+      if (reportChart && typeof reportChart.toBase64Image === 'function') {
+        y = pdfSectionTitle(pdf, 'Resumo por Período', margin, y);
+        y += 6;
 
-        if (chartImg && chartImg.startsWith('data:image/png')) {
-          pdf.addImage(chartImg, 'PNG', margin, y, chartWidth, chartHeight);
-          y += chartHeight + 35;
-        } else {
-          throw new Error('Imagem do gráfico indisponível');
+        try {
+          // Qualidade 0.85: bom equilíbrio entre nitidez e tamanho do PDF
+          const chartImg = reportChart.toBase64Image('image/png', 0.85);
+          const chartWidth = contentWidth;
+          const chartHeight = 150;
+
+          if (chartImg && chartImg.startsWith('data:image/png')) {
+            // JPEG compressa no PDF quando possível reduz tamanho sem perda perceptível no gráfico
+            const fmt = chartImg.indexOf('image/jpeg') >= 0 ? 'JPEG' : 'PNG';
+            pdf.addImage(chartImg, fmt, margin, y, chartWidth, chartHeight);
+            y += chartHeight + 28;
+          } else {
+            throw new Error('Imagem do gráfico indisponível');
+          }
+        } catch (error) {
+          console.error('Erro ao incorporar grafico no PDF:', error);
+          pdf.setFillColor(244, 247, 252);
+          pdf.setDrawColor(226, 232, 240);
+          pdf.roundedRect(margin, y, contentWidth, 90, 8, 8, 'FD');
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(12);
+          pdf.setTextColor(15, 23, 42);
+          pdf.text('Resumo por período disponível apenas em texto:', margin + 15, y + 24);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(10);
+          pdf.setTextColor(100, 116, 139);
+          const reportTotalReceitas = receitas.reduce((sum, r) => sum + parseMoneyInput(r.valor), 0);
+          const reportTotalDespesas = despesas.reduce((sum, d) => sum + parseMoneyInput(d.valor), 0);
+          pdf.text(`Receitas: ${formatCurrency(reportTotalReceitas)}`, margin + 15, y + 46);
+          pdf.text(`Despesas: ${formatCurrency(reportTotalDespesas)}`, margin + 15, y + 62);
+          y += 120;
         }
-      } catch (error) {
-        console.error('Erro ao incorporar grafico no PDF:', error);
-        pdf.setFillColor(244, 247, 252);
-        pdf.setDrawColor(226, 232, 240);
-        pdf.roundedRect(margin, y, contentWidth, 90, 8, 8, 'FD');
-        pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(12);
-        pdf.setTextColor(15, 23, 42);
-        pdf.text('Resumo por período disponível apenas em texto:', margin + 15, y + 24);
+      }
+
+      // Tabela mensal em ordem cronológica (garante a sequência correta mesmo sem o gráfico)
+      {
+        const pageH = pdf.internal.pageSize.getHeight();
+        const rowH = 16;
+        if (y + 40 + flowRows.length * rowH > pageH - 60) {
+          pdf.addPage();
+          y = drawPrismaHeader(pdf, { margin, logoData, title: 'Prisma', subtitle: 'Relatório Financeiro — Gestão Inteligente', showProfile: false }) + 12;
+        }
+        y = pdfSectionTitle(pdf, 'Receitas e Despesas por Mês', margin, y);
+        const colMes = margin + 4, colRec = margin + contentWidth * 0.42, colDes = margin + contentWidth * 0.70, colSal = margin + contentWidth - 4;
+        pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(100, 116, 139);
+        pdf.text('Mês', colMes, y);
+        pdf.text('Receitas', colRec, y, { align: 'right' });
+        pdf.text('Despesas', colDes, y, { align: 'right' });
+        pdf.text('Saldo', colSal, y, { align: 'right' });
+        y += 6; pdf.setDrawColor(226, 232, 240); pdf.setLineWidth(0.6); pdf.line(margin, y, margin + contentWidth, y); y += 12;
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9.5);
+        flowRows.forEach((r, i) => {
+          if (i % 2 === 1) { pdf.setFillColor(248, 250, 252); pdf.rect(margin, y - 10, contentWidth, rowH, 'F'); }
+          pdf.setTextColor(15, 23, 42);
+          pdf.text(r.label, colMes, y);
+          pdf.text(fmtMoney(r.inc), colRec, y, { align: 'right' });
+          pdf.text(fmtMoney(r.exp), colDes, y, { align: 'right' });
+          pdf.setTextColor(r.saldo >= 0 ? 4 : 220, r.saldo >= 0 ? 120 : 38, r.saldo >= 0 ? 87 : 38);
+          pdf.text(fmtMoney(r.saldo), colSal, y, { align: 'right' });
+          y += rowH;
+        });
+        y += 16;
+      }
+
+      // Economy Recommendations Section
+      const economiaData = gerarRecomendacoesEconomia();
+      if (economiaData.numeroRecomendacoes > 0) {
+        y = pdfSectionTitle(pdf, 'Recomendações de Economia', margin, y);
+        y += 6;
+
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(10);
         pdf.setTextColor(100, 116, 139);
-        const reportTotalReceitas = receitas.reduce((sum, r) => sum + parseMoneyInput(r.valor), 0);
-        const reportTotalDespesas = despesas.reduce((sum, d) => sum + parseMoneyInput(d.valor), 0);
-        pdf.text(`Receitas: ${formatCurrency(reportTotalReceitas)}`, margin + 15, y + 46);
-        pdf.text(`Despesas: ${formatCurrency(reportTotalDespesas)}`, margin + 15, y + 62);
-        y += 120;
-      }
-    }
+        pdf.text(`Taxa de poupança atual: ${economiaData.taxaPoupancaAtual}`, margin, y);
+        pdf.text(`Economia potencial: ${economiaData.economiaTotal}`, margin + 220, y);
+        y += 20;
 
-    // Economy Recommendations Section
-    const economiaData = gerarRecomendacoesEconomia();
-    if (economiaData.numeroRecomendacoes > 0) {
-      y = pdfSectionTitle(pdf, 'Recomendações de Economia', margin, y);
-      y += 6;
+        economiaData.recomendacoes.forEach((rec, index) => {
+          if (y > pdf.internal.pageSize.getHeight() - 200) {
+            pdf.addPage();
+            y = drawPrismaHeader(pdf, {
+              margin, logoData,
+              title: 'Prisma',
+              subtitle: 'Relatório Financeiro — Gestão Inteligente',
+              showProfile: false
+            }) + 12;
+          }
+
+          // Badge de impacto
+          const impactoColors = {
+            'Alto': [220, 38, 38],
+            'Médio': [245, 158, 11],
+            'Baixo': [59, 130, 246]
+          };
+          const impactoColor = impactoColors[rec.impacto] || [100, 116, 139];
+
+          // Obter detalhes expandidos da recomendação
+          const detalhesExpandidos = obterDetalhesExpandidosRecomendacao(rec);
+          const maxLargura = contentWidth - 30;
+
+          // Pré-calcula linhas para altura real (evita corte/quebra no PDF)
+          const sugestaoTexto = `Sugestão: ${rec.sugestao || ''}`;
+          const sugestaoLinhas = pdf.splitTextToSize(sugestaoTexto, maxLargura);
+          const sugLines = Array.isArray(sugestaoLinhas) ? sugestaoLinhas.length : 1;
+
+          let extraLines = 0;
+          let contextoLinhas = [];
+          if (detalhesExpandidos.contexto) {
+            contextoLinhas = pdf.splitTextToSize(`Contexto: ${detalhesExpandidos.contexto}`, maxLargura);
+            extraLines += Array.isArray(contextoLinhas) ? contextoLinhas.length : 1;
+          }
+          const estrategias = (detalhesExpandidos.estrategias || []).slice(0, 3);
+          if (estrategias.length) {
+            extraLines += 1; // título "Estratégias"
+            estrategias.forEach((estrategia) => {
+              const el = pdf.splitTextToSize(`  • ${estrategia}`, maxLargura - 10);
+              extraLines += Array.isArray(el) ? el.length : 1;
+            });
+          }
+          let prazoLinhas = [];
+          if (detalhesExpandidos.prazo) {
+            prazoLinhas = pdf.splitTextToSize(`Prazo sugerido: ${detalhesExpandidos.prazo}`, maxLargura);
+            extraLines += Array.isArray(prazoLinhas) ? prazoLinhas.length : 1;
+          }
+
+          // Altura dinâmica: cabeçalho + sugestão + economia + detalhes + padding
+          const lineH = 12;
+          const alturaEstimada = Math.max(110, 28 + sugLines * lineH + 22 + extraLines * 11 + 18);
+
+          // Quebra de página se o bloco não couber
+          if (y + alturaEstimada > pdf.internal.pageSize.getHeight() - 50) {
+            pdf.addPage();
+            y = drawPrismaHeader(pdf, {
+              margin, logoData,
+              title: 'Prisma',
+              subtitle: 'Relatório Financeiro — Gestão Inteligente',
+              showProfile: false
+            }) + 12;
+          }
+
+          pdf.setFillColor(244, 247, 252);
+          pdf.setDrawColor(226, 232, 240);
+          pdf.roundedRect(margin, y, contentWidth, alturaEstimada, 8, 8, 'FD');
+
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(12);
+          pdf.setTextColor(15, 23, 42);
+          pdf.text(`${index + 1}. ${rec.categoria} (${rec.percentual})`, margin + 15, y + 20);
+
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(10);
+          pdf.setTextColor(59, 130, 246);
+          let posAtual = pdfWriteLines(pdf, Array.isArray(sugestaoLinhas) ? sugestaoLinhas.join(' ') : sugestaoLinhas, margin + 15, y + 36, maxLargura, {
+            lineHeight: lineH,
+            ctx: { margin, logoData, title: 'Prisma', subtitle: 'Relatório Financeiro' }
+          });
+
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(10);
+          pdf.setTextColor(impactoColor[0], impactoColor[1], impactoColor[2]);
+          posAtual = pdfWriteLines(pdf, `Economia: ${rec.economia} | Impacto: ${rec.impacto}`, margin + 15, posAtual + 2, maxLargura, {
+            lineHeight: lineH,
+            fontStyle: 'bold',
+            fontSize: 10,
+            color: impactoColor,
+            ctx: { margin, logoData, title: 'Prisma', subtitle: 'Relatório Financeiro' }
+          });
+
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+          pdf.setTextColor(100, 116, 139);
+
+          let detalheY = posAtual + 8;
+          const linhaHeight = 12;
+          const pdfCtx = { margin, logoData, title: 'Prisma', subtitle: 'Relatório Financeiro' };
+
+          if (detalhesExpandidos.contexto) {
+            detalheY = pdfWriteLines(pdf, Array.isArray(contextoLinhas) ? contextoLinhas.join(' ') : contextoLinhas, margin + 15, detalheY, maxLargura, {
+              lineHeight: 11, fontSize: 9, color: [100, 116, 139], ctx: pdfCtx
+            });
+          }
+
+          if (estrategias.length) {
+            detalheY = pdfWriteLines(pdf, 'Estratégias:', margin + 15, detalheY, maxLargura, {
+              lineHeight: linhaHeight, fontSize: 9, color: [100, 116, 139], ctx: pdfCtx
+            });
+            estrategias.forEach((estrategia) => {
+              detalheY = pdfWriteLines(pdf, `  • ${estrategia}`, margin + 15, detalheY, Math.max(40, maxLargura - 10), {
+                lineHeight: 11, fontSize: 9, color: [100, 116, 139], ctx: pdfCtx
+              });
+            });
+          }
+
+          if (detalhesExpandidos.prazo) {
+            pdf.text(prazoLinhas, margin + 15, detalheY);
+            detalheY += (Array.isArray(prazoLinhas) ? prazoLinhas.length : 1) * 11;
+          }
+
+          y += alturaEstimada + 12;
+        });
+
+        y += 25;
+      }
+
+      // ===== Seções avançadas (categorias, contas, metas, alertas) — sem sobrepor =====
+      const pdfCtx = {
+        margin,
+        logoData,
+        title: 'Prisma',
+        subtitle: 'Relatório Financeiro — Gestão Inteligente'
+      };
+
+      // Despesas por categoria
+      {
+        const catMap = {};
+        (despesas || []).forEach((d) => {
+          const c = String(d.categoria || 'Outros').trim() || 'Outros';
+          catMap[c] = (catMap[c] || 0) + parseMoneyInput(d.valor);
+        });
+        const catRows = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 12);
+        const totalCat = catRows.reduce((s, r) => s + r[1], 0) || 1;
+        if (catRows.length) {
+          y = pdfEnsureSpace(pdf, y, 40 + catRows.length * 16, pdfCtx);
+          y = pdfSectionTitle(pdf, 'Despesas por Categoria', margin, y);
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(100, 116, 139);
+          pdf.text('Categoria', margin + 4, y);
+          pdf.text('Valor', margin + contentWidth * 0.55, y);
+          pdf.text('%', margin + contentWidth - 8, y, { align: 'right' });
+          y += 12;
+          catRows.forEach(([nome, valor], idx) => {
+            y = pdfEnsureSpace(pdf, y, 16, pdfCtx);
+            if (idx % 2 === 1) {
+              pdf.setFillColor(248, 250, 252);
+              pdf.rect(margin, y - 10, contentWidth, 14, 'F');
+            }
+            pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(30, 41, 59);
+            pdf.text(pdfTruncate(pdf, nome, contentWidth * 0.48), margin + 4, y);
+            pdf.setTextColor(220, 60, 80);
+            pdf.text(fmtMoney(valor), margin + contentWidth * 0.55, y);
+            pdf.setTextColor(100, 116, 139);
+            pdf.text(((valor / totalCat) * 100).toFixed(1) + '%', margin + contentWidth - 8, y, { align: 'right' });
+            y += 14;
+          });
+          y += 12;
+        }
+      }
+
+      // Contas
+      if (Array.isArray(contas) && contas.length) {
+        y = pdfEnsureSpace(pdf, y, 36 + Math.min(contas.length, 10) * 16, pdfCtx);
+        y = pdfSectionTitle(pdf, 'Contas e Saldos', margin, y);
+        contas.slice(0, 12).forEach((c, idx) => {
+          y = pdfEnsureSpace(pdf, y, 16, pdfCtx);
+          if (idx % 2 === 1) {
+            pdf.setFillColor(248, 250, 252);
+            pdf.rect(margin, y - 10, contentWidth, 14, 'F');
+          }
+          const nome = c.nome || c.name || c.banco || 'Conta';
+          const saldo = parseMoneyInput(c.saldo != null ? c.saldo : c.balance);
+          pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(30, 41, 59);
+          pdf.text(pdfTruncate(pdf, nome, contentWidth * 0.55), margin + 4, y);
+          pdf.setTextColor(saldo >= 0 ? 0 : 220, saldo >= 0 ? 140 : 60, saldo >= 0 ? 80 : 80);
+          pdf.setFont('helvetica', 'bold');
+          pdf.text(fmtMoney(saldo), margin + contentWidth - 8, y, { align: 'right' });
+          y += 14;
+        });
+        y += 12;
+      }
+
+      // Metas
+      if (Array.isArray(goals) && goals.length) {
+        y = pdfEnsureSpace(pdf, y, 36 + Math.min(goals.length, 8) * 18, pdfCtx);
+        y = pdfSectionTitle(pdf, 'Metas Financeiras', margin, y);
+        goals.slice(0, 10).forEach((g) => {
+          y = pdfEnsureSpace(pdf, y, 18, pdfCtx);
+          const titulo = g.titulo || g.title || g.nome || 'Meta';
+          const atual = parseMoneyInput(g.atual != null ? g.atual : g.current);
+          const alvo = parseMoneyInput(g.alvo != null ? g.alvo : (g.target || g.valor));
+          const pct = alvo > 0 ? Math.min(100, (atual / alvo) * 100) : 0;
+          pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(30, 41, 59);
+          pdf.text(pdfTruncate(pdf, titulo, contentWidth * 0.45), margin + 4, y);
+          pdf.setTextColor(100, 116, 139);
+          pdf.text(`${fmtMoney(atual)} / ${fmtMoney(alvo)} (${pct.toFixed(0)}%)`, margin + contentWidth - 8, y, { align: 'right' });
+          y += 12;
+          // barra de progresso
+          pdf.setFillColor(226, 232, 240);
+          pdf.roundedRect(margin + 4, y - 4, contentWidth - 8, 5, 2, 2, 'F');
+          pdf.setFillColor(37, 99, 235);
+          const barW = Math.max(2, ((contentWidth - 8) * pct) / 100);
+          pdf.roundedRect(margin + 4, y - 4, barW, 5, 2, 2, 'F');
+          y += 12;
+        });
+        y += 8;
+      }
+
+      // Alertas de gastos (se houver)
+      try {
+        const sa = window.__latestSpendAlerts || (typeof evaluateRealtimeSpendAlerts === 'function'
+          ? evaluateRealtimeSpendAlerts({ notify: false }) : null);
+        if (sa && Array.isArray(sa.alerts) && sa.alerts.length) {
+          y = pdfEnsureSpace(pdf, y, 36 + Math.min(sa.alerts.length, 6) * 28, pdfCtx);
+          y = pdfSectionTitle(pdf, 'Alertas de Gastos', margin, y);
+          sa.alerts.slice(0, 6).forEach((a) => {
+            const lines = pdf.splitTextToSize((a.titulo || 'Alerta') + ' — ' + (a.mensagem || ''), contentWidth - 16);
+            const blockH = 10 + lines.length * 11;
+            y = pdfEnsureSpace(pdf, y, blockH + 6, pdfCtx);
+            pdf.setFillColor(a.prioridade === 'alta' ? 254 : 255, a.prioridade === 'alta' ? 242 : 251, a.prioridade === 'alta' ? 242 : 235);
+            pdf.setDrawColor(a.prioridade === 'alta' ? 252 : 253, a.prioridade === 'alta' ? 165 : 186, a.prioridade === 'alta' ? 165 : 116);
+            pdf.roundedRect(margin, y - 8, contentWidth, blockH, 4, 4, 'FD');
+            pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(30, 41, 59);
+            pdf.text(lines, margin + 8, y + 2);
+            y += blockH + 6;
+          });
+          y += 8;
+        }
+      } catch (_) { }
+
+      // Transactions Table
+      y = pdfEnsureSpace(pdf, y, 50, pdfCtx);
+      y = pdfSectionTitle(pdf, 'Últimas Transações', margin, y);
+      y += 8;
+
+      const theads = ['Categoria', 'Descrição', 'Conta', 'Valor', 'Data', 'Status'];
+      const colWidths = [90, 140, 90, 90, 70, 70];
+      const rowHeight = 26;
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(10);
+      pdf.setFillColor(15, 23, 42);
+      pdf.setTextColor(255, 255, 255);
+      // FIX P1.1: Draw filled rect FIRST, then draw text on top (previously rect covered text)
+      pdf.rect(margin, y, contentWidth, rowHeight, 'F');
+      let cx = margin;
+      theads.forEach((head, i) => {
+        pdf.text(head, cx + 8, y + 18);
+        cx += colWidths[i];
+      });
+      y += rowHeight;
 
       pdf.setFont('helvetica', 'normal');
       pdf.setFontSize(10);
-      pdf.setTextColor(100, 116, 139);
-      pdf.text(`Taxa de poupança atual: ${economiaData.taxaPoupancaAtual}`, margin, y);
-      pdf.text(`Economia potencial: ${economiaData.economiaTotal}`, margin + 220, y);
-      y += 20;
 
-      economiaData.recomendacoes.forEach((rec, index) => {
-        if (y > pdf.internal.pageSize.getHeight() - 200) {
+      const allTrans = [];
+      receitas.forEach((r) => {
+        allTrans.push({ catName: r.origem, desc: r.descricao, account: r.conta, value: `+${fmtMoney(parseMoneyInput(r.valor))}`, type: 'pos', date: fmtDateBR(r.data), statusText: r.status === 'paid' ? 'Recebido' : 'Pendente', _ts: r.data || '' });
+      });
+      despesas.forEach((d) => {
+        allTrans.push({ catName: d.categoria, desc: d.descricao, account: d.conta, value: `-${fmtMoney(parseMoneyInput(d.valor))}`, type: 'neg', date: fmtDateBR(d.data), statusText: d.status === 'paid' ? 'Pago' : 'Pendente', _ts: d.data || '' });
+      });
+      // Ordena por data desc e limita para PDF legível (sem páginas infinitas)
+      allTrans.sort((a, b) => String(b._ts).localeCompare(String(a._ts)));
+      const transForPdf = allTrans.slice(0, 40);
+
+      transForPdf.forEach((t, index) => {
+        if (y > pdf.internal.pageSize.getHeight() - 80) {
           pdf.addPage();
           y = drawPrismaHeader(pdf, {
             margin, logoData,
@@ -9610,261 +10530,75 @@ document.addEventListener('DOMContentLoaded', () => {
             subtitle: 'Relatório Financeiro — Gestão Inteligente',
             showProfile: false
           }) + 12;
-        }
-
-        // Badge de impacto
-        const impactoColors = {
-          'Alto': [220, 38, 38],
-          'Médio': [245, 158, 11],
-          'Baixo': [59, 130, 246]
-        };
-        const impactoColor = impactoColors[rec.impacto] || [100, 116, 139];
-
-        // Obter detalhes expandidos da recomendação
-        const detalhesExpandidos = obterDetalhesExpandidosRecomendacao(rec);
-
-        // Calcular altura necessária baseada no conteúdo
-        let alturaEstimada = 90; // Altura base
-        if (detalhesExpandidos.contexto) alturaEstimada += 15;
-        if (detalhesExpandidos.estrategias && detalhesExpandidos.estrategias.length > 0) {
-          alturaEstimada += 15 + (Math.min(detalhesExpandidos.estrategias.length, 3) * 15);
-        }
-        if (detalhesExpandidos.prazo) alturaEstimada += 15;
-        
-        // Garantir altura mínima e máxima
-        alturaEstimada = Math.max(130, Math.min(alturaEstimada, 180));
-
-        pdf.setFillColor(244, 247, 252);
-        pdf.setDrawColor(226, 232, 240);
-        pdf.roundedRect(margin, y, contentWidth, alturaEstimada, 8, 8, 'FD');
-
-        pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(12);
-        pdf.setTextColor(15, 23, 42);
-        pdf.text(`${index + 1}. ${rec.categoria} (${rec.percentual})`, margin + 15, y + 25);
-
-        pdf.setFont('helvetica', 'normal');
-        pdf.setFontSize(10);
-        pdf.setTextColor(59, 130, 246);
-        
-        // Quebrar linha se a sugestão for muito longa
-        const sugestaoTexto = `Sugestao: ${rec.sugestao}`;
-        const maxLargura = contentWidth - 30;
-        const sugestaoLinhas = pdf.splitTextToSize(sugestaoTexto, maxLargura);
-        
-        if (Array.isArray(sugestaoLinhas)) {
-          pdf.text(sugestaoLinhas, margin + 15, y + 42);
-        } else {
-          pdf.text(sugestaoTexto, margin + 15, y + 42);
-        }
-
-        let posAtual = y + 42 + (Array.isArray(sugestaoLinhas) ? sugestaoLinhas.length * 12 : 12);
-
-        pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(10);
-        pdf.setTextColor(impactoColor[0], impactoColor[1], impactoColor[2]);
-        pdf.text(`Economia: ${rec.economia} | Impacto: ${rec.impacto}`, margin + 15, posAtual + 8);
-
-        // Adicionar detalhes expandidos
-        pdf.setFont('helvetica', 'normal');
-        pdf.setFontSize(9);
-        pdf.setTextColor(100, 116, 139);
-        
-        let detalheY = posAtual + 20;
-        const linhaHeight = 14;
-        
-        if (detalhesExpandidos.contexto) {
-          const contextoTexto = `Contexto: ${detalhesExpandidos.contexto}`;
-          const contextoLinhas = pdf.splitTextToSize(contextoTexto, maxLargura);
-          if (Array.isArray(contextoLinhas)) {
-            pdf.text(contextoLinhas, margin + 15, detalheY);
-            detalheY += contextoLinhas.length * 11;
-          } else {
-            pdf.text(contextoTexto, margin + 15, detalheY);
-            detalheY += linhaHeight;
-          }
-        }
-        
-        if (detalhesExpandidos.estrategias && detalhesExpandidos.estrategias.length > 0) {
-          pdf.text('Estratégias:', margin + 15, detalheY);
-          detalheY += linhaHeight;
-          detalhesExpandidos.estrategias.forEach((estrategia, i) => {
-            if (i < 3) {
-              const estrategiaTexto = `  • ${estrategia}`;
-              const estrategiaLinhas = pdf.splitTextToSize(estrategiaTexto, maxLargura - 10);
-              if (Array.isArray(estrategiaLinhas)) {
-                pdf.text(estrategiaLinhas, margin + 15, detalheY);
-                detalheY += estrategiaLinhas.length * 11;
-              } else {
-                pdf.text(estrategiaTexto, margin + 15, detalheY);
-                detalheY += linhaHeight;
-              }
-            }
-          });
-        }
-        
-        if (detalhesExpandidos.prazo) {
-          const prazoTexto = `Prazo sugerido: ${detalhesExpandidos.prazo}`;
-          const prazoLinhas = pdf.splitTextToSize(prazoTexto, maxLargura);
-          if (Array.isArray(prazoLinhas)) {
-            pdf.text(prazoLinhas, margin + 15, detalheY);
-            detalheY += prazoLinhas.length * 11;
-          } else {
-            pdf.text(prazoTexto, margin + 15, detalheY);
-            detalheY += linhaHeight;
-          }
-        }
-
-        y += alturaEstimada + 10;
-      });
-
-      y += 25;
-    }
-
-    // Transactions Table
-    y = pdfSectionTitle(pdf, 'Últimas Transações', margin, y);
-    y += 8;
-
-    const theads = ['Categoria', 'Descrição', 'Conta', 'Valor', 'Data', 'Status'];
-    const colWidths = [90, 140, 90, 90, 70, 70];
-    const rowHeight = 26;
-
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(10);
-    pdf.setFillColor(15, 23, 42);
-    pdf.setTextColor(255, 255, 255);
-    // FIX P1.1: Draw filled rect FIRST, then draw text on top (previously rect covered text)
-    pdf.rect(margin, y, contentWidth, rowHeight, 'F');
-    let cx = margin;
-    theads.forEach((head, i) => {
-      pdf.text(head, cx + 8, y + 18);
-      cx += colWidths[i];
-    });
-    y += rowHeight;
-
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(10);
-
-    const allTrans = [];
-    receitas.forEach((r) => {
-      allTrans.push({ catName: r.origem, desc: r.descricao, account: r.conta, value: `+${fmtMoney(parseMoneyInput(r.valor))}`, type: 'pos', date: fmtDateBR(r.data), statusText: r.status === 'paid' ? 'Recebido' : 'Pendente' });
-    });
-    despesas.forEach((d) => {
-      allTrans.push({ catName: d.categoria, desc: d.descricao, account: d.conta, value: `-${fmtMoney(parseMoneyInput(d.valor))}`, type: 'neg', date: fmtDateBR(d.data), statusText: d.status === 'paid' ? 'Pago' : 'Pendente' });
-    });
-
-    allTrans.forEach((t, index) => {
-      if (y > pdf.internal.pageSize.getHeight() - 80) {
-        pdf.addPage();
-        y = drawPrismaHeader(pdf, {
-          margin, logoData,
-          title: 'Prisma',
-          subtitle: 'Relatório Financeiro — Gestão Inteligente',
-          showProfile: false
-        }) + 12;
-        // redraw table header
-        pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(9);
-        pdf.setFillColor(15, 23, 42);
-        pdf.setTextColor(255, 255, 255);
-        let hx = margin;
-        theads.forEach((head, i) => {
-          pdf.rect(hx, y, colWidths[i], rowHeight, 'F');
-          pdf.text(head, hx + 6, y + 16);
-          hx += colWidths[i];
-        });
-        y += rowHeight;
-      }
-
-      if (index % 2 === 1) {
-        pdf.setFillColor(248, 250, 252);
-      } else {
-        pdf.setFillColor(255, 255, 255);
-      }
-      pdf.rect(margin, y, contentWidth, rowHeight, 'F');
-
-      const isPos = t.type === 'pos';
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(8);
-      const values = [t.catName, t.desc, t.account, t.value, t.date, t.statusText];
-      cx = margin;
-      values.forEach((val, i) => {
-        const maxW = colWidths[i] - 12;
-        const txt = pdfTruncate(pdf, val, maxW);
-        if (i === 3) {
-          pdf.setTextColor(isPos ? 0 : 220, isPos ? 150 : 60, isPos ? 80 : 80);
+          // redraw table header
           pdf.setFont('helvetica', 'bold');
-        } else if (i === 5) {
-          pdf.setTextColor(isPos || /pago/i.test(String(val)) ? 0 : 180, isPos || /pago/i.test(String(val)) ? 140 : 100, 60);
-          pdf.setFont('helvetica', 'normal');
-        } else {
-          pdf.setTextColor(30, 41, 59);
-          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+          pdf.setFillColor(15, 23, 42);
+          pdf.setTextColor(255, 255, 255);
+          let hx = margin;
+          theads.forEach((head, i) => {
+            pdf.rect(hx, y, colWidths[i], rowHeight, 'F');
+            pdf.text(head, hx + 6, y + 16);
+            hx += colWidths[i];
+          });
+          y += rowHeight;
         }
-        pdf.text(txt, cx + 6, y + 16);
-        cx += colWidths[i];
+
+        if (index % 2 === 1) {
+          pdf.setFillColor(248, 250, 252);
+        } else {
+          pdf.setFillColor(255, 255, 255);
+        }
+        pdf.rect(margin, y, contentWidth, rowHeight, 'F');
+
+        const isPos = t.type === 'pos';
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(8);
+        const values = [t.catName, t.desc, t.account, t.value, t.date, t.statusText];
+        cx = margin;
+        values.forEach((val, i) => {
+          const maxW = colWidths[i] - 12;
+          const txt = pdfTruncate(pdf, val, maxW);
+          if (i === 3) {
+            pdf.setTextColor(isPos ? 0 : 220, isPos ? 150 : 60, isPos ? 80 : 80);
+            pdf.setFont('helvetica', 'bold');
+          } else if (i === 5) {
+            pdf.setTextColor(isPos || /pago/i.test(String(val)) ? 0 : 180, isPos || /pago/i.test(String(val)) ? 140 : 100, 60);
+            pdf.setFont('helvetica', 'normal');
+          } else {
+            pdf.setTextColor(30, 41, 59);
+            pdf.setFont('helvetica', 'normal');
+          }
+          pdf.text(txt, cx + 6, y + 16);
+          cx += colWidths[i];
+        });
+
+        pdf.setDrawColor(226, 232, 240);
+        pdf.line(margin, y + rowHeight, margin + contentWidth, y + rowHeight);
+        y += rowHeight;
       });
 
-      pdf.setDrawColor(226, 232, 240);
-      pdf.line(margin, y + rowHeight, margin + contentWidth, y + rowHeight);
-      y += rowHeight;
-    });
+      drawPrismaFooterAllPages(pdf, { margin });
 
-    drawPrismaFooterAllPages(pdf, { margin });
+      // Salvar PDF automaticamente
+      const filename = `relatorio-prisma-${new Date().toISOString().split('T')[0]}.pdf`;
+      pdf.save(filename);
 
-    // Salvar PDF automaticamente
-    const filename = `relatorio-prisma-${new Date().toISOString().split('T')[0]}.pdf`;
-    pdf.save(filename);
-    
-    showToast('PDF gerado com sucesso! ✓');
-    try { if (window.PrismaNotify) window.PrismaNotify('PDF gerado', 'Relatório financeiro em PDF baixado com sucesso.', 'pdf'); } catch(_){}
-    
-    return {
-      blob: pdf.output('blob'),
-      dataUri: pdf.output('datauristring'),
-      filename: filename,
-      pdf,
-    };
+      showToast('PDF gerado com sucesso! ✓');
+      try { if (window.PrismaNotify) window.PrismaNotify('PDF gerado', 'Relatório financeiro em PDF baixado com sucesso.', 'pdf'); } catch (_) { }
+
+      return {
+        blob: pdf.output('blob'),
+        dataUri: pdf.output('datauristring'),
+        filename: filename,
+        pdf,
+      };
     } catch (error) {
       console.error('Erro ao preparar relatório PDF:', error);
       showToast('Não foi possível gerar o relatório PDF. Tente novamente.');
       return null;
-    }
-  }
-
-  // ==================== RELATÓRIOS PROFISSIONAIS (CSV / XLSX) ====================
-  // Helpers de exportação — UTF-8 com BOM, delimitador ";", escaping seguro
-
-  let _prismaExportBusy = false;
-
-  function prismaCsvEscape(val) {
-    const s = val == null ? '' : String(val);
-    // Sempre entre aspas para proteger acentos, ; e quebras de linha
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-
-  function prismaFormatMoneyBR(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return 'R$ 0,00';
-    return formatCurrency(n);
-  }
-
-  function prismaFormatPercentBR(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return '0,00%';
-    return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
-  }
-
-  function prismaFormatDateBR(isoOrDate) {
-    if (!isoOrDate) return '';
-    try {
-      const d = typeof isoOrDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(isoOrDate)
-        ? new Date(isoOrDate + 'T12:00:00')
-        : new Date(isoOrDate);
-      if (isNaN(d.getTime())) return String(isoOrDate);
-      return d.toLocaleDateString('pt-BR');
-    } catch (_) {
-      return String(isoOrDate);
+    } finally {
+      if (typeof _prismaExportBusy !== 'undefined') _prismaExportBusy = false;
     }
   }
 
@@ -9878,7 +10612,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const money = (v) => {
       try {
         if (window.PrismaFinance && typeof window.PrismaFinance.money === 'function') return window.PrismaFinance.money(v);
-      } catch (_) {}
+      } catch (_) { }
       if (typeof parseMoneyInput === 'function') return parseMoneyInput(v) || 0;
       const n = parseFloat(v);
       return Number.isFinite(n) ? n : 0;
@@ -10079,6 +10813,22 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
+    // Fluxo mensal completo (12 meses, ordem cronológica)
+    section('FLUXO MENSAL (12 MESES)');
+    row('Mês', 'Receitas', 'Despesas', 'Saldo');
+    try {
+      const flowRows = typeof getMonthlyFlowForPdf === 'function' ? getMonthlyFlowForPdf() : [];
+      if (!flowRows.length) {
+        row('(sem dados)', '', '', '');
+      } else {
+        flowRows.forEach((r) => {
+          row(r.label, prismaFormatMoneyBR(r.inc), prismaFormatMoneyBR(r.exp), prismaFormatMoneyBR(r.saldo));
+        });
+      }
+    } catch (_) {
+      row('(indisponível)', '', '', '');
+    }
+
     section('METAS');
     row('Meta', 'Valor atual', 'Valor objetivo', 'Restante', 'Progresso', 'Ano');
     if (!data.listMetas.length) {
@@ -10130,7 +10880,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.appendChild(link);
     link.click();
     setTimeout(() => {
-      try { document.body.removeChild(link); } catch (_) {}
+      try { document.body.removeChild(link); } catch (_) { }
       URL.revokeObjectURL(url);
     }, 800);
   }
@@ -10156,11 +10906,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const filename = `Prisma_Relatorio_Financeiro_${dateStamp}.csv`;
       prismaDownloadBlob(blob, filename);
       showToast('✓ Relatório CSV gerado com sucesso');
-      try { if (window.PrismaNotify) window.PrismaNotify('CSV exportado', 'Relatório financeiro CSV baixado com sucesso.', 'export'); } catch (_) {}
+      try { if (window.PrismaNotify) window.PrismaNotify('CSV exportado', 'Relatório financeiro CSV baixado com sucesso.', 'export'); } catch (_) { }
     } catch (error) {
       console.error('Erro ao exportar CSV:', error);
       showToast('Não foi possível gerar o relatório. Tente novamente.');
-      try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar CSV.', 'danger'); } catch (_) {}
+      try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar CSV.', 'danger'); } catch (_) { }
       throw error;
     } finally {
       _prismaExportBusy = false;
@@ -10172,6 +10922,79 @@ document.addEventListener('DOMContentLoaded', () => {
     await loadScript('https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js');
     if (!window.XLSX) throw new Error('SheetJS não carregou');
     return window.XLSX;
+  }
+
+  async function loadJSZip() {
+    if (window.JSZip) return window.JSZip;
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+    if (!window.JSZip) throw new Error('JSZip não carregou');
+    return window.JSZip;
+  }
+
+  /**
+   * Exportação ZIP (backup local): relatório CSV + snapshot JSON dos dados em memória.
+   * Não acessa Firebase nem altera storage — apenas lê arrays já carregados no cliente.
+   */
+  async function exportToZip() {
+    if (_prismaExportBusy) {
+      showToast('Aguarde: exportação em andamento...');
+      return;
+    }
+    _prismaExportBusy = true;
+    try {
+      showToast('Preparando backup ZIP...');
+      await prismaYield(20);
+      const JSZip = await loadJSZip();
+      const data = prismaCollectReportData();
+      const csvBody = prismaBuildCsvContent(data);
+      const dateStamp = new Date().toISOString().slice(0, 10);
+
+      // Snapshot somente dos dados locais já em memória (sem Firebase)
+      const snapshot = {
+        exportadoEm: new Date().toISOString(),
+        versao: 'prisma-gef-backup-1',
+        periodo: data.periodoLabel,
+        resumo: {
+          totalReceitas: data.totalReceitas,
+          totalDespesas: data.totalDespesas,
+          saldo: data.saldo,
+          patrimonio: data.patrimonio
+        },
+        receitas: Array.isArray(receitas) ? receitas : [],
+        despesas: Array.isArray(despesas) ? despesas : [],
+        contas: Array.isArray(contas) ? contas : [],
+        cartoes: Array.isArray(cartoes) ? cartoes : [],
+        investimentos: Array.isArray(investimentos) ? investimentos : [],
+        metas: Array.isArray(goals) ? goals : [],
+        fluxoMensal: typeof getMonthlyFlowForPdf === 'function' ? getMonthlyFlowForPdf() : []
+      };
+
+      const zip = new JSZip();
+      zip.file(`Prisma_Relatorio_${dateStamp}.csv`, '\uFEFF' + csvBody);
+      zip.file(`Prisma_Snapshot_${dateStamp}.json`, JSON.stringify(snapshot, null, 2));
+      zip.file('LEIA-ME.txt',
+        'Prisma GEF — Backup local\n' +
+        '========================\n' +
+        `Gerado em: ${new Date().toLocaleString('pt-BR')}\n\n` +
+        'Conteúdo:\n' +
+        `- Prisma_Relatorio_${dateStamp}.csv  → relatório tabular (Excel/Sheets)\n` +
+        `- Prisma_Snapshot_${dateStamp}.json → dados brutos do perfil ativo nesta sessão\n\n` +
+        'Este arquivo NÃO contém credenciais Firebase nem tokens de autenticação.\n'
+      );
+
+      showToast('Compactando arquivos...');
+      await prismaYield(10);
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      prismaDownloadBlob(blob, `Prisma_Backup_${dateStamp}.zip`);
+      showToast('✓ Backup ZIP baixado com sucesso');
+      try { if (window.PrismaNotify) window.PrismaNotify('ZIP exportado', 'Backup local (CSV + JSON) baixado.', 'export'); } catch (_) { }
+    } catch (error) {
+      console.error('Erro ao exportar ZIP:', error);
+      showToast('Não foi possível gerar o ZIP. Você ainda pode usar Exportar CSV.');
+      try { if (window.PrismaNotify) window.PrismaNotify('Falha no ZIP', 'Não foi possível gerar o backup ZIP.', 'danger'); } catch (_) { }
+    } finally {
+      _prismaExportBusy = false;
+    }
   }
 
   async function exportToExcel() {
@@ -10352,11 +11175,11 @@ document.addEventListener('DOMContentLoaded', () => {
       XLSX.writeFile(wb, filename);
 
       showToast('✓ Relatório Excel gerado com sucesso');
-      try { if (window.PrismaNotify) window.PrismaNotify('Excel exportado', 'Relatório financeiro XLSX baixado com sucesso.', 'export'); } catch (_) {}
+      try { if (window.PrismaNotify) window.PrismaNotify('Excel exportado', 'Relatório financeiro XLSX baixado com sucesso.', 'export'); } catch (_) { }
     } catch (error) {
       console.error('Erro ao exportar Excel:', error);
       showToast('Não foi possível gerar o relatório. Tente novamente.');
-      try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar Excel.', 'danger'); } catch (_) {}
+      try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar Excel.', 'danger'); } catch (_) { }
       throw error;
     } finally {
       _prismaExportBusy = false;
@@ -10367,31 +11190,29 @@ document.addEventListener('DOMContentLoaded', () => {
   // Função para gerar recomendações de economia
   function gerarRecomendacoesEconomia() {
     const recomendacoes = [];
-    
-    // Calcular totais por categoria (apenas gastos não prioritários)
+
+    // Categorias consideradas essenciais (redução mais conservadora)
+    const essenciais = new Set(['moradia', 'aluguel', 'habitacao', 'habitação', 'saude', 'saúde', 'plano de saude', 'plano de saúde', 'educacao', 'educação', 'transporte essencial', 'alimentacao basica', 'alimentação básica']);
+
+    // Agrega TODOS os gastos registrados por categoria (fonte real de dados)
     const gastosPorCategoria = {};
-    despesas.forEach(d => {
-      // Filtrar apenas gastos não prioritários (baixa e média)
-      const prioridade = d.prioridade || 'media';
-      if (prioridade === 'urgente' || prioridade === 'alta') {
-        return; // Pular gastos prioritários
+    const qtdPorCategoria = {};
+    despesas.forEach((d) => {
+      const cat = String(d.categoria || d.category || 'Outros').trim() || 'Outros';
+      const prioridade = String(d.prioridade || 'media').toLowerCase();
+      // Essenciais de prioridade alta/urgente: ainda entram no total, mas com corte menor
+      gastosPorCategoria[cat] = (gastosPorCategoria[cat] || 0) + parseMoneyInput(d.valor);
+      qtdPorCategoria[cat] = (qtdPorCategoria[cat] || 0) + 1;
+      if (!gastosPorCategoria.__prio) gastosPorCategoria.__prio = {};
+      if (prioridade === 'alta' || prioridade === 'urgente') {
+        gastosPorCategoria.__prio[cat] = true;
       }
-      
-      if (!gastosPorCategoria[d.categoria]) {
-        gastosPorCategoria[d.categoria] = 0;
-      }
-      gastosPorCategoria[d.categoria] += parseMoneyInput(d.valor);
     });
-    
-    // Total de despesas (apenas não prioritárias)
-    const totalDespesas = despesas
-      .filter(d => {
-        const prioridade = d.prioridade || 'media';
-        return prioridade !== 'urgente' && prioridade !== 'alta';
-      })
-      .reduce((acc, d) => acc + parseMoneyInput(d.valor), 0);
-    
-    // Se não houver despesas não prioritárias, retornar sem recomendações
+    const prioMap = gastosPorCategoria.__prio || {};
+    delete gastosPorCategoria.__prio;
+
+    const totalDespesas = Object.values(gastosPorCategoria).reduce((a, b) => a + b, 0);
+
     if (totalDespesas === 0) {
       return {
         recomendacoes: [],
@@ -10400,54 +11221,55 @@ document.addEventListener('DOMContentLoaded', () => {
         taxaPoupancaAtual: receitasMes > 0 ? ((economiaMes / receitasMes) * 100).toFixed(1) + '%' : '0%'
       };
     }
-    
-    // Ordenar categorias por valor (maior gasto primeiro)
+
+    // Ordenar categorias por valor (maior gasto primeiro) — top 6
     const categoriasOrdenadas = Object.entries(gastosPorCategoria)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5); // Top 5 categorias
-    
-    // Análise de cada categoria (apenas categorias não prioritárias)
+      .slice(0, 6);
+
     categoriasOrdenadas.forEach(([categoria, valor]) => {
-      // Verificar se a categoria é prioritária
-      const despesasCategoria = despesas.filter(d => d.categoria === categoria);
-      const categoriaPrioritaria = despesasCategoria.some(d => {
-        const prioridade = d.prioridade || 'media';
-        return prioridade === 'urgente' || prioridade === 'alta';
+      const pctNum = totalDespesas > 0 ? (valor / totalDespesas) * 100 : 0;
+      const pct = pctNum.toFixed(1);
+      const isEssencial = essenciais.has(String(categoria).toLowerCase()) || prioMap[categoria];
+      // Cortes sugeridos: essencial 5–8%, discricionário 10–25% conforme peso
+      let corte = 0.1;
+      let impacto = 'Médio';
+      if (isEssencial) {
+        corte = pctNum > 35 ? 0.08 : 0.05;
+        impacto = 'Baixo';
+      } else if (pctNum > 30) {
+        corte = 0.25;
+        impacto = 'Alto';
+      } else if (pctNum > 15) {
+        corte = 0.15;
+        impacto = 'Médio';
+      } else if (pctNum > 8) {
+        corte = 0.1;
+        impacto = 'Baixo';
+      } else {
+        return; // peso muito baixo — não gera ruído
+      }
+      const economiaPotencial = Math.round(valor * corte);
+      if (economiaPotencial < 1) return;
+      recomendacoes.push({
+        categoria,
+        valor: fmtMoney(valor),
+        percentual: pct + '%',
+        sugestao: isEssencial
+          ? `Revise ${categoria} com cuidado (essencial): meta de redução de cerca de ${Math.round(corte * 100)}% sem comprometer o básico`
+          : `Reduza gastos em ${categoria} em cerca de ${Math.round(corte * 100)}% (${qtdPorCategoria[categoria] || 0} lançamentos)`,
+        economia: fmtMoney(economiaPotencial),
+        impacto,
+        economiaPotencial,
+        percentualReducao: Math.round(corte * 100),
+        titulo: `Otimizar ${categoria}`,
+        acaoRecomendada: isEssencial ? 'Revisar contratos e tarifas' : 'Definir teto mensal na categoria'
       });
-      
-      // Pular categorias prioritárias
-      if (categoriaPrioritaria) {
-        return;
-      }
-      
-      const pct = (valor / totalDespesas * 100).toFixed(1);
-      
-      if (pct > 30) {
-        const economiaPotencial = (valor * 0.2).toFixed(0);
-        recomendacoes.push({
-          categoria,
-          valor: fmtMoney(valor),
-          percentual: pct + '%',
-          sugestao: `Reduza gastos em ${categoria} em 20%`,
-          economia: fmtMoney(economiaPotencial),
-          impacto: 'Alto'
-        });
-      } else if (pct > 15) {
-        const economiaPotencial = (valor * 0.1).toFixed(0);
-        recomendacoes.push({
-          categoria,
-          valor: fmtMoney(valor),
-          percentual: pct + '%',
-          sugestao: `Reduza gastos em ${categoria} em 10%`,
-          economia: fmtMoney(economiaPotencial),
-          impacto: 'Médio'
-        });
-      }
     });
-    
+
     // Recomendações gerais baseadas na taxa de poupança
     const taxaPoupanca = receitasMes > 0 ? ((economiaMes / receitasMes) * 100).toFixed(1) : 0;
-    
+
     if (taxaPoupanca < 10) {
       recomendacoes.push({
         categoria: 'Geral',
@@ -10467,17 +11289,17 @@ document.addEventListener('DOMContentLoaded', () => {
         impacto: 'Médio'
       });
     }
-    
+
     // Recomendações específicas por tipo de gasto (apenas não prioritários)
     // Nota: Não fazemos recomendações específicas para categorias que podem ser prioritárias
     // As recomendações são geradas dinamicamente baseadas nas categorias não prioritárias encontradas
-    
+
     // Calcular economia total potencial
     const economiaTotal = recomendacoes.reduce((acc, r) => {
       const valorNumerico = parseFloat(r.economia.replace('R$', '').replace('.', '').replace(',', '.'));
       return acc + valorNumerico;
     }, 0);
-    
+
     return {
       recomendacoes,
       economiaTotal: fmtMoney(economiaTotal),
@@ -10493,25 +11315,31 @@ document.addEventListener('DOMContentLoaded', () => {
         generatePDF().catch((error) => {
           console.error('Erro ao gerar PDF:', error);
           showToast('Não foi possível gerar o PDF. Tente novamente.');
-          try { if (window.PrismaNotify) window.PrismaNotify('Falha ao gerar PDF', 'Não foi possível gerar o PDF. Tente novamente.', 'danger'); } catch(_){}
+          try { if (window.PrismaNotify) window.PrismaNotify('Falha ao gerar PDF', 'Não foi possível gerar o PDF. Tente novamente.', 'danger'); } catch (_) { }
         });
       } else if (btn.classList.contains('email')) {
         sendPDFByEmail().catch((error) => {
           console.error('Erro ao enviar PDF por e-mail:', error);
           showToast('Não foi possível enviar o PDF por e-mail.');
-          try { if (window.PrismaNotify) window.PrismaNotify('Falha no e-mail', 'Não foi possível enviar o PDF por e-mail.', 'danger'); } catch(_){}
+          try { if (window.PrismaNotify) window.PrismaNotify('Falha no e-mail', 'Não foi possível enviar o PDF por e-mail.', 'danger'); } catch (_) { }
         });
       } else if (btn.classList.contains('excel')) {
         exportToExcel().catch((error) => {
           console.error('Erro ao exportar Excel:', error);
           showToast('Não foi possível exportar Excel. Tente novamente.');
-          try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar Excel.', 'danger'); } catch(_){}
+          try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar Excel.', 'danger'); } catch (_) { }
         });
       } else if (btn.classList.contains('csv')) {
         exportToCSV().catch((error) => {
           console.error('Erro ao exportar CSV:', error);
           showToast('Não foi possível exportar CSV. Tente novamente.');
-          try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar CSV.', 'danger'); } catch(_){}
+          try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar CSV.', 'danger'); } catch (_) { }
+        });
+      } else if (btn.classList.contains('zip')) {
+        exportToZip().catch((error) => {
+          console.error('Erro ao exportar ZIP:', error);
+          showToast('Não foi possível exportar ZIP. Tente novamente.');
+          try { if (window.PrismaNotify) window.PrismaNotify('Falha na exportação', 'Não foi possível exportar ZIP.', 'danger'); } catch (_) { }
         });
       }
     });
@@ -10533,18 +11361,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const blob = result?.blob || null;
       if (blob) {
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href=url; a.download=result.filename||'relatorio-prisma.pdf'; a.click();
-        setTimeout(()=>URL.revokeObjectURL(url),1000);
+        const a = document.createElement('a'); a.href = url; a.download = result.filename || 'relatorio-prisma.pdf'; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
       const subject = 'Relatório financeiro — Prisma';
       const body = 'Seu relatório financeiro foi gerado pelo Prisma. O arquivo foi baixado para que você possa anexá-lo ao seu e-mail.';
       window.open(`mailto:${encodeURIComponent(recipient.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank', 'noopener,noreferrer');
       showToast('Relatório gerado e e-mail preparado.');
-      try { if (window.PrismaNotify) window.PrismaNotify('Relatório por e-mail', 'PDF gerado e cliente de e-mail aberto para envio.', 'email'); } catch(_){}
+      try { if (window.PrismaNotify) window.PrismaNotify('Relatório por e-mail', 'PDF gerado e cliente de e-mail aberto para envio.', 'email'); } catch (_) { }
     } catch (error) {
       console.error('Erro ao gerar relatório para e-mail:', error);
       showToast('Não foi possível preparar o relatório por e-mail.');
-      try { if (window.PrismaNotify) window.PrismaNotify('Falha no e-mail', 'Não foi possível preparar o relatório por e-mail.', 'danger'); } catch(_){}
+      try { if (window.PrismaNotify) window.PrismaNotify('Falha no e-mail', 'Não foi possível preparar o relatório por e-mail.', 'danger'); } catch (_) { }
     }
   }
 
@@ -10567,6 +11395,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function buildMonthlyGrid() {
     const monthlyGrid = getMonthlyGridEl();
     if (!monthlyGrid) return;
+    // Força sempre os 12 meses em ordem cronológica (mais antigo → atual)
+    const { short } = getLast12Months();
+    months = short;
+    // Garante arrays de 12 posições
+    if (!Array.isArray(incomeData) || incomeData.length !== 12) incomeData = Array(12).fill(0).map((_, i) => Number(incomeData?.[i]) || 0);
+    if (!Array.isArray(expenseData) || expenseData.length !== 12) expenseData = Array(12).fill(0).map((_, i) => Number(expenseData?.[i]) || 0);
     monthlyGrid.innerHTML = '';
     months.forEach((m, i) => {
       const field = document.createElement('div');
@@ -10642,7 +11476,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const novoSaldo = inputSaldo ? (parseFloat(inputSaldo.value) || 0) : saldoAtual;
     const novasReceitasMes = inputReceitas ? (parseFloat(inputReceitas.value) || 0) : receitasMes;
     const novasDespesasMes = inputDespesas ? (parseFloat(inputDespesas.value) || 0) : despesasMes;
-    
+
     // Atualizar summary
     saldoAtual = novoSaldo;
     salarioMensal = novoSalario;
@@ -10651,14 +11485,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Sincronizar salário com receitas
     if (novoSalario > 0) {
       // Verificar se já existe receita de salário
-      const salarioReceita = receitas.find(r => 
-        r.categoria.toLowerCase().includes('salário') || 
+      const salarioReceita = receitas.find(r =>
+        r.categoria.toLowerCase().includes('salário') ||
         r.categoria.toLowerCase().includes('salario') ||
         r.categoria.toLowerCase().includes('renda') ||
         r.descricao.toLowerCase().includes('salário') ||
         r.descricao.toLowerCase().includes('salario')
       );
-      
+
       if (salarioReceita) {
         // Atualizar receita existente
         salarioReceita.valor = novoSalario;
@@ -10674,7 +11508,7 @@ document.addEventListener('DOMContentLoaded', () => {
           recorrente: true
         });
       }
-      
+
       // Salvar receitas atualizadas
       saveDataStorage(STORAGE_KEYS.receitas, receitas);
     }
@@ -10684,7 +11518,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Verificar se precisa criar receita adicional
       const totalReceitasAtual = receitas.reduce((sum, r) => sum + parseMoneyInput(r.valor), 0);
       const diferenca = novasReceitasMes - totalReceitasAtual;
-      
+
       if (Math.abs(diferenca) > 0.01) {
         // Criar receita para ajustar o total
         if (diferenca > 0) {
@@ -10707,7 +11541,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const expInputs = monthlyGrid.querySelectorAll('.month-expense');
       incInputs.forEach((inp) => { incomeData[parseInt(inp.dataset.index, 10)] = parseFloat(inp.value) || 0; });
       expInputs.forEach((inp) => { expenseData[parseInt(inp.dataset.index, 10)] = parseFloat(inp.value) || 0; });
-      saveDataStorage(STORAGE_KEYS.monthlyFlow, { inc: incomeData, exp: expenseData });
+      saveDataStorage(STORAGE_KEYS.monthlyFlow, { inc: incomeData, exp: expenseData, keys: getLast12Months().keys });
     }
 
     const categoryEditGrid = getCategoryEditGridEl();
@@ -10740,7 +11574,7 @@ document.addEventListener('DOMContentLoaded', () => {
     receitasMes = receitas.reduce((sum, r) => sum + parseMoneyInput(r.valor), 0);
     despesasMes = despesas.reduce((sum, d) => sum + parseMoneyInput(d.valor), 0);
     economiaMes = receitasMes - despesasMes;
-    
+
     // Atualizar inputs após sincronização
     if (inputReceitas) inputReceitas.value = receitasMes;
     if (inputDespesas) inputDespesas.value = despesasMes;
@@ -10750,7 +11584,7 @@ document.addEventListener('DOMContentLoaded', () => {
     recalculateAll();
     renderReceitas();
     renderDespesas();
-    
+
     showToast('Dados salvos e sincronizados com receitas/despesas! ✓');
   }
 
@@ -10762,14 +11596,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const novoSalario = parseFloat(inputSalario.value) || 0;
       if (novoSalario > 0) {
         // Verificar se já existe receita de salário
-        const salarioReceita = receitas.find(r => 
-          r.categoria.toLowerCase().includes('salário') || 
+        const salarioReceita = receitas.find(r =>
+          r.categoria.toLowerCase().includes('salário') ||
           r.categoria.toLowerCase().includes('salario') ||
           r.categoria.toLowerCase().includes('renda') ||
           r.descricao.toLowerCase().includes('salário') ||
           r.descricao.toLowerCase().includes('salario')
         );
-        
+
         if (salarioReceita) {
           // Atualizar receita existente
           salarioReceita.valor = novoSalario;
@@ -10785,19 +11619,19 @@ document.addEventListener('DOMContentLoaded', () => {
             recorrente: true
           });
         }
-        
+
         // Salvar receitas atualizadas
         saveDataStorage(STORAGE_KEYS.receitas, receitas);
-        
+
         // Atualizar salário mensal
         salarioMensal = novoSalario;
         saveDataStorage(STORAGE_KEYS.summary, { saldoAtual, salarioMensal });
-        
+
         // Atualizar interface
         recalculateAll();
         renderReceitas();
         fillSummary();
-        
+
         showToast('Salário sincronizado com receitas! ✓');
       }
     });
@@ -10807,11 +11641,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (inputDespesas) {
     inputDespesas.addEventListener('change', () => {
       const novasDespesasMes = parseFloat(inputDespesas.value) || 0;
-      
+
       if (novasDespesasMes > 0) {
         const totalDespesasAtual = despesas.reduce((sum, d) => sum + parseMoneyInput(d.valor), 0);
         const diferenca = novasDespesasMes - totalDespesasAtual;
-        
+
         if (Math.abs(diferenca) > 0.01) {
           if (diferenca > 0) {
             // Criar despesa de ajuste inteligente
@@ -10823,48 +11657,48 @@ document.addEventListener('DOMContentLoaded', () => {
               data: new Date().toISOString().split('T')[0],
               recorrente: false
             });
-            
+
             saveDataStorage(STORAGE_KEYS.despesas, despesas);
-            
+
             recalculateAll();
             renderDespesas();
             fillSummary();
-            
+
             showToast(`R$ ${formatCurrency(diferenca)} adicionado às despesas! ✓`);
           } else {
             // Reduzir despesas existentes de forma inteligente
             let valorParaReduzir = Math.abs(diferenca);
-            
+
             // Primeiro, tentar reduzir despesas não essenciais
-            const despesasOutros = despesas.filter(d => 
+            const despesasOutros = despesas.filter(d =>
               d.categoria.toLowerCase().includes('outros') ||
               d.categoria.toLowerCase().includes('lazer') ||
               d.descricao.toLowerCase().includes('ajuste')
             ).sort((a, b) => a.valor - b.valor);
-            
+
             for (let despesa of despesasOutros) {
               if (valorParaReduzir <= 0) break;
-              
+
               const despesaIndex = despesas.findIndex(d => d.id === despesa.id);
               if (despesaIndex !== -1) {
                 const reducaoPossivel = Math.min(valorParaReduzir, despesa.valor);
                 despesa.valor -= reducaoPossivel;
                 valorParaReduzir -= reducaoPossivel;
-                
+
                 if (despesa.valor <= 0.01) {
                   despesas.splice(despesaIndex, 1);
                 }
               }
             }
-            
+
             // Se ainda precisa reduzir, reduzir outras despesas proporcionalmente
             if (valorParaReduzir > 0.01 && despesas.length > 0) {
-              const despesasEssenciais = despesas.filter(d => 
+              const despesasEssenciais = despesas.filter(d =>
                 !d.categoria.toLowerCase().includes('outros') &&
                 !d.categoria.toLowerCase().includes('lazer') &&
                 !d.descricao.toLowerCase().includes('ajuste')
               );
-              
+
               if (despesasEssenciais.length > 0) {
                 const reducaoPorDespesa = valorParaReduzir / despesasEssenciais.length;
                 despesasEssenciais.forEach(despesa => {
@@ -10878,13 +11712,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
               }
             }
-            
+
             saveDataStorage(STORAGE_KEYS.despesas, despesas);
-            
+
             recalculateAll();
             renderDespesas();
             fillSummary();
-            
+
             showToast(`Despesas ajustadas automaticamente! ✓`);
           }
         }
@@ -10896,11 +11730,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (inputReceitas) {
     inputReceitas.addEventListener('change', () => {
       const novasReceitasMes = parseFloat(inputReceitas.value) || 0;
-      
+
       if (novasReceitasMes > 0) {
         const totalReceitasAtual = receitas.reduce((sum, r) => sum + parseMoneyInput(r.valor), 0);
         const diferenca = novasReceitasMes - totalReceitasAtual;
-        
+
         if (Math.abs(diferenca) > 0.01) {
           if (diferenca > 0) {
             // Criar receita adicional
@@ -10912,45 +11746,45 @@ document.addEventListener('DOMContentLoaded', () => {
               data: new Date().toISOString().split('T')[0],
               recorrente: false
             });
-            
+
             saveDataStorage(STORAGE_KEYS.receitas, receitas);
-            
+
             recalculateAll();
             renderReceitas();
             fillSummary();
-            
+
             showToast(`R$ ${formatCurrency(diferenca)} adicionado às receitas! ✓`);
           } else {
             // Reduzir receitas existentes
             let valorParaReduzir = Math.abs(diferenca);
-            
+
             // Primeiro, reduzir receitas não essenciais
-            const receitasOutros = receitas.filter(r => 
+            const receitasOutros = receitas.filter(r =>
               r.categoria.toLowerCase().includes('outros') ||
               r.descricao.toLowerCase().includes('adicional')
             ).sort((a, b) => a.valor - b.valor);
-            
+
             for (let receita of receitasOutros) {
               if (valorParaReduzir <= 0) break;
-              
+
               const receitaIndex = receitas.findIndex(r => r.id === receita.id);
               if (receitaIndex !== -1) {
                 const reducaoPossivel = Math.min(valorParaReduzir, receita.valor);
                 receita.valor -= reducaoPossivel;
                 valorParaReduzir -= reducaoPossivel;
-                
+
                 if (receita.valor <= 0.01) {
                   receitas.splice(receitaIndex, 1);
                 }
               }
             }
-            
+
             saveDataStorage(STORAGE_KEYS.receitas, receitas);
-            
+
             recalculateAll();
             renderReceitas();
             fillSummary();
-            
+
             showToast(`Receitas ajustadas automaticamente! ✓`);
           }
         }
@@ -10962,11 +11796,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (inputSaldo) {
     inputSaldo.addEventListener('change', () => {
       const novoSaldo = parseFloat(inputSaldo.value) || 0;
-      
+
       if (novoSaldo >= 0) {
         const totalContasAtual = contas.reduce((sum, c) => sum + (parseFloat(c.saldo) || 0), 0);
         const diferenca = novoSaldo - totalContasAtual;
-        
+
         if (Math.abs(diferenca) > 0.01) {
           if (diferenca > 0) {
             // Criar conta bancária para ajustar o saldo
@@ -10986,42 +11820,42 @@ document.addEventListener('DOMContentLoaded', () => {
               const contaPrincipal = contas[0];
               contaPrincipal.saldo += diferenca;
             }
-            
+
             saveDataStorage(STORAGE_KEYS.contas, contas);
-            
+
             recalculateAll();
             renderContas();
             fillSummary();
-            
+
             showToast(`R$ ${formatCurrency(diferenca)} adicionado às contas! ✓`);
           } else {
             // Reduzir saldo das contas de forma inteligente
             let valorParaReduzir = Math.abs(diferenca);
-            
+
             // Primeiro, reduzir contas com maior saldo
             const contasOrdenadas = [...contas].sort((a, b) => b.saldo - a.saldo);
-            
+
             for (let conta of contasOrdenadas) {
               if (valorParaReduzir <= 0) break;
-              
+
               const contaIndex = contas.findIndex(c => c.id === conta.id);
               if (contaIndex !== -1) {
                 const reducaoPossivel = Math.min(valorParaReduzir, conta.saldo);
                 contas[contaIndex].saldo -= reducaoPossivel;
                 valorParaReduzir -= reducaoPossivel;
-                
+
                 if (contas[contaIndex].saldo <= 0.01) {
                   contas.splice(contaIndex, 1);
                 }
               }
             }
-            
+
             saveDataStorage(STORAGE_KEYS.contas, contas);
-            
+
             recalculateAll();
             renderContas();
             fillSummary();
-            
+
             showToast(`Saldo das contas ajustado automaticamente! ✓`);
           }
         }
@@ -11074,7 +11908,7 @@ document.addEventListener('DOMContentLoaded', () => {
           currentProfileId = profiles[0].id;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   function checkInitialState() {
@@ -11101,7 +11935,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==================== INITIALIZE PAGE ====================
-  (async function initializePersistence(){
+  (async function initializePersistence() {
     try {
       const app = document.getElementById('mainApp') || document.querySelector('.app');
       if (app) app.style.display = 'none';
@@ -11165,9 +11999,9 @@ document.addEventListener('DOMContentLoaded', () => {
       showAuthFeedback('loginFeedback', authErrorMessage(error), 'error');
     }
   })();
-  
+
   // ==================== GRAND CARD & FINANCIAL MODULES MANAGER ====================
-  window.PrismaFinancialDashboard = (function() {
+  window.PrismaFinancialDashboard = (function () {
     let activeModule = null; // 'cashflow' | 'distribution' | 'monitoring' | 'income-expense'
     let previousActiveElement = null;
 
@@ -11180,7 +12014,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openModule(moduleId, triggerElement = null) {
       if (!moduleId || !moduleModals[moduleId]) return;
-      
+
       // Se outro modal estiver aberto, fecha com transição suave
       if (activeModule && activeModule !== moduleId) {
         closeModule(false);
@@ -11229,11 +12063,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       } else if (moduleId === 'monitoring') {
         if (typeof updateMonitoringCenter === 'function') {
-          try { updateMonitoringCenter(); } catch (_) {}
+          try { updateMonitoringCenter(); } catch (_) { }
         }
       } else if (moduleId === 'income-expense') {
         if (typeof updateIncomeExpenseCard === 'function') {
-          try { updateIncomeExpenseCard(); } catch (_) {}
+          try { updateIncomeExpenseCard(); } catch (_) { }
         }
       }
 
@@ -11348,25 +12182,25 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Initialize charts on first load and when returning to dashboard
-  
+
   function initializeCharts() {
     if (!window.Chart) {
       setTimeout(initializeCharts, 120);
       return;
     }
     if (chartsInitialized) {
-      try { updatePieChart(); } catch (_) {}
-      try { updateIncomePieChart(); } catch (_) {}
+      try { updatePieChart(); } catch (_) { }
+      try { updateIncomePieChart(); } catch (_) { }
       return;
     }
     chartsInitialized = true;
-    
+
     try {
       initCashflowChart();
     } catch (error) {
       console.error('Erro ao inicializar gráfico de fluxo:', error);
     }
-    
+
     try {
       rebuildExpenseCategoriesFromData();
       initPieChart();
@@ -11379,14 +12213,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.error('Erro ao inicializar gráfico de receitas:', error);
     }
-    
+
     try {
       initReportChart();
     } catch (error) {
       console.error('Erro ao inicializar gráfico de relatório:', error);
     }
   }
-  
+
   // Inicializar o dashboard também na primeira abertura
   setTimeout(initializeCharts, 150);
 
@@ -11398,13 +12232,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Window resize re-trigger
-  window.addEventListener('resize', () => {
-    if (cashflowChart) cashflowChart.resize();
-    if (pieChart) pieChart.resize();
-    if (incomePieChart) incomePieChart.resize();
-    if (reportChart) reportChart.resize();
-  });
+  // Window resize re-trigger — debounce para não redesenhar dezenas de vezes
+  window.addEventListener('resize', prismaDebouncedResizeCharts);
 
   // ==================== INVESTMENT CARDS SYSTEM ====================
   const investmentData = {
@@ -11729,7 +12558,7 @@ document.addEventListener('DOMContentLoaded', () => {
             assetId: a.id
           }));
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     return Array.isArray(data.options) ? data.options.slice() : [];
   }
@@ -11778,6 +12607,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const sim = document.getElementById('investStepSimulate');
     if (opt) opt.hidden = step !== 'options';
     if (sim) sim.hidden = step !== 'simulate';
+    // Garante que o corpo do modal role e o botão "Aplicar investimento" fique acessível
+    const modal = document.getElementById('investModal');
+    const body = modal?.querySelector('.modal-body');
+    if (body) {
+      requestAnimationFrame(() => {
+        if (step === 'simulate') {
+          const applyBtn = document.getElementById('applyInvestmentBtn');
+          if (applyBtn) applyBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          else body.scrollTop = body.scrollHeight;
+        } else {
+          body.scrollTop = 0;
+        }
+      });
+    }
   }
 
   function renderInvestOptions(type, query) {
@@ -12055,7 +12898,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
     if (investmentChart) {
-      try { investmentChart.destroy(); } catch (_) {}
+      try { investmentChart.destroy(); } catch (_) { }
     }
     investmentChart = new window.Chart(ctx, {
       type: 'line',
@@ -12220,8 +13063,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAiRecommendations(recommendations);
     renderAiSavingsPlan(savingsPlan, consolidated);
 
-    // Persistir snapshot no backend se conectado
-    if (serverAuthenticated) {
+    // Persistir snapshot no backend apenas se conectado E consentido (LGPD)
+    const hasAnalyticsConsent = (typeof currentLocalUser !== 'undefined' && currentLocalUser?.analyticsConsent !== false) ||
+      (typeof currentServerUser !== 'undefined' && currentServerUser?.analyticsConsent !== false);
+    if (serverAuthenticated && hasAnalyticsConsent) {
       apiFetch('/api/prisma-ai/analysis', {
         method: 'POST',
         body: JSON.stringify({ analysis, recommendations, healthScore: window.__currentAiHealthScore })
@@ -12236,10 +13081,10 @@ document.addEventListener('DOMContentLoaded', () => {
       botMsg += `• Taxa de poupança atual: ${analysis.taxaPoupanca.toFixed(1)}%\n\n`;
 
       if (recommendations.length > 0) {
-        botMsg += `💡 Identifiquei ${recommendations.length} recomendação(ões) fundamentada(s) nos seus dados, com potencial de economia de até ${formatCurrency(consolidated.economiaPotencialTotal)} mensais (sem sobreposição).\n\n`;
+        botMsg += `Identifiquei ${recommendations.length} recomendação(ões) fundamentada(s) nos seus dados, com potencial de economia de até ${formatCurrency(consolidated.economiaPotencialTotal)} mensais (sem sobreposição).\n\n`;
         botMsg += `Veja os detalhes abaixo, selecione as ações que deseja adotar e clique em "Adicionar ao Plano" para transformá-las em metas!`;
       } else {
-        botMsg += `🎉 Suas finanças estão muito bem equilibradas no período analisado! Não foram detectados gastos excessivos nem anomalias.`;
+        botMsg += `Suas finanças estão muito bem equilibradas no período analisado! Não foram detectados gastos excessivos nem anomalias.`;
       }
 
       addBotMessage(botMsg);
@@ -12491,7 +13336,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!canvas || typeof window.Chart === 'undefined') return;
 
     if (aiCategoryChartInstance) {
-      try { aiCategoryChartInstance.destroy(); } catch (_) {}
+      try { aiCategoryChartInstance.destroy(); } catch (_) { }
     }
 
     const categories = Array.isArray(analysis?.gastosPorCategoria) ? analysis.gastosPorCategoria.slice(0, 6) : [];
@@ -12551,7 +13396,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!canvas || typeof window.Chart === 'undefined') return;
 
     if (aiComparisonChartInstance) {
-      try { aiComparisonChartInstance.destroy(); } catch (_) {}
+      try { aiComparisonChartInstance.destroy(); } catch (_) { }
     }
 
     const receitas = analysis.receitasTotal;
@@ -12816,7 +13661,7 @@ document.addEventListener('DOMContentLoaded', () => {
     saveAiSavingsPlan(plan);
     runPrismaAiAnalysis(aiActivePeriod, { showBotMessage: false });
 
-    addBotMessage(`🎯 Excelente! Você adotou a meta: "${rec.titulo}". Economia estimada de ${formatCurrency(rec.economiaPotencial)}/mês adicionada ao seu plano. Continue acompanhando seus gastos!`);
+    addBotMessage(`Excelente! Você adotou a meta: "${rec.titulo}". Economia estimada de ${formatCurrency(rec.economiaPotencial)}/mês adicionada ao seu plano. Continue acompanhando seus gastos!`);
     showToast(`✓ Meta "${rec.categoria}" adicionada ao plano de economia!`);
   }
 
@@ -12899,7 +13744,7 @@ document.addEventListener('DOMContentLoaded', () => {
     saveAiSavingsPlan(plan);
     runPrismaAiAnalysis(aiActivePeriod, { showBotMessage: false });
 
-    addBotMessage(`🎉 Parabéns! Você concluiu com sucesso a meta de economia: "${goal.titulo || goal.categoria}"!`);
+    addBotMessage(`Parabéns! Você concluiu com sucesso a meta de economia: "${goal.titulo || goal.categoria}"!`);
     showToast('Meta marcada como concluída.');
   }
 
@@ -12952,7 +13797,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function generateAIPDF() {
-    addBotMessage('📄 Preparando e gerando relatório completo em PDF... Isso levará alguns instantes.');
+    addBotMessage('Preparando e gerando relatório completo em PDF... Isso levará alguns instantes.');
     showToast('Gerando relatório PDF da análise...');
 
     try {
@@ -12985,8 +13830,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const contentWidth = pageWidth - margin * 2;
       const periodName = periodLabel(aiActivePeriod);
 
-      // Helper local para títulos de seção refinados
-      function drawAiSectionHeader(title, sectionY) {
+      // Helper local: título de seção + quebra de página segura (sem sobrepor rodapé)
+      function drawAiSectionHeader(title, sectionY, neededBelow = 80) {
+        if (sectionY + neededBelow > pageHeight - 56) {
+          pdf.addPage();
+          sectionY = drawPrismaHeader(pdf, {
+            margin,
+            logoData,
+            title: 'Prisma AI — Relatório Financeiro',
+            subtitle: 'Diagnóstico Inteligente e Plano de Economia Pessoal',
+            showProfile: false
+          }) + 12;
+        }
         pdf.setFillColor(241, 245, 249);
         pdf.rect(margin, sectionY, contentWidth, 22, 'F');
         pdf.setFillColor(37, 99, 235);
@@ -13484,7 +14339,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.PrismaNotify) {
           window.PrismaNotify('PDF Gerado', 'Relatório completo do Prisma AI pronto para visualização.', 'pdf');
         }
-      } catch (_) {}
+      } catch (_) { }
 
     } catch (err) {
       console.error('[PrismaAI] Erro ao gerar PDF:', err);
@@ -13539,8 +14394,8 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <p class="ai-step-text">
               ${recs.length > 0
-                ? `Identificamos ${recs.length} áreas com potencial de ajuste de custos em despesas não essenciais ou serviços recorrentes.`
-                : 'Seus gastos estão equilibrados sem excessos aparentes nas categorias analisadas.'}
+        ? `Identificamos ${recs.length} áreas com potencial de ajuste de custos em despesas não essenciais ou serviços recorrentes.`
+        : 'Seus gastos estão equilibrados sem excessos aparentes nas categorias analisadas.'}
             </p>
           </div>
 
@@ -13571,94 +14426,120 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshIcons();
   }
 
+  // ==================== MOTOR DE PROCESSAMENTO E FILA PRISMA AI ====================
+  const _aiMessageQueue = [];
+  let _isAiThinking = false;
+
+  async function processNextAiQuestion() {
+    if (_isAiThinking || _aiMessageQueue.length === 0) return;
+    _isAiThinking = true;
+
+    const aiSend = document.getElementById('aiSend');
+    const aiInput = document.getElementById('aiInput');
+    if (aiSend) aiSend.disabled = true;
+
+    const item = _aiMessageQueue.shift();
+    showAiTyping();
+
+    // Debounce perceptivo de processamento natural (250-350ms)
+    await new Promise(r => setTimeout(r, 280));
+
+    try {
+      // Recomendações sempre derivadas dos gastos cadastrados (fonte única)
+      let liveRecs = window.__currentAiRecommendations || [];
+      try {
+        if (typeof gerarRecomendacoesEconomia === 'function') {
+          const eco = gerarRecomendacoesEconomia();
+          if (eco && Array.isArray(eco.recomendacoes) && eco.recomendacoes.length) {
+            liveRecs = eco.recomendacoes.map((r) => ({
+              titulo: r.titulo || r.sugestao || r.categoria,
+              categoria: r.categoria,
+              economiaPotencial: Number(r.economiaPotencial) || parseMoneyInput(r.economia) || 0,
+              percentualReducao: r.percentualReducao || 10,
+              acaoRecomendada: r.acaoRecomendada || r.sugestao || ''
+            }));
+            window.__currentAiRecommendations = liveRecs;
+          }
+        }
+      } catch (_) { }
+
+      let spendAlerts = window.__latestSpendAlerts || null;
+      try {
+        if (typeof evaluateRealtimeSpendAlerts === 'function') {
+          spendAlerts = evaluateRealtimeSpendAlerts({ notify: false }) || spendAlerts;
+        }
+      } catch (_) { }
+
+      const userData = {
+        receitas: Array.isArray(receitas) ? receitas : [],
+        despesas: Array.isArray(despesas) ? despesas : [],
+        contas: Array.isArray(contas) ? contas : [],
+        cartoes: Array.isArray(cartoes) ? cartoes : [],
+        investimentos: Array.isArray(investimentos) ? investimentos : [],
+        goals: Array.isArray(goals) ? goals : [],
+        recommendations: liveRecs,
+        spendAlerts: spendAlerts,
+        periodLabel: typeof periodLabel === 'function' ? periodLabel(aiActivePeriod) : 'no período selecionado',
+        salarioMensal: typeof salarioMensal !== 'undefined' ? salarioMensal : 0,
+        saldoAtual: typeof saldoAtual !== 'undefined' ? saldoAtual : 0,
+        incomeData: Array.isArray(incomeData) ? incomeData : [],
+        expenseData: Array.isArray(expenseData) ? expenseData : []
+      };
+
+      const engine = window.PrismaAiEngine;
+      const answer = engine
+        ? engine.generateAnswer(item.question, userData)
+        : { intent: 'fallback', text: 'Calculando seus dados financeiros...' };
+
+      hideAiTyping();
+
+      if (answer.intent === 'analise_gastos') {
+        const res = await runPrismaAiAnalysis(aiActivePeriod, { showBotMessage: false });
+        if (res && typeof renderProgressiveAnalysisChat === 'function') {
+          renderProgressiveAnalysisChat(res.analysis, res.recommendations, res.consolidated);
+        } else {
+          addBotMessage(answer.text, { chips: answer.chips, action: answer.action });
+        }
+      } else if (answer.action && answer.action.type === 'generate_pdf') {
+        addBotMessage(answer.text);
+        if (typeof generateAIPDF === 'function') generateAIPDF();
+      } else {
+        addBotMessage(answer.text, { chips: answer.chips, action: answer.action });
+      }
+
+    } catch (err) {
+      console.error('[PrismaAI] Erro ao responder:', err);
+      hideAiTyping();
+      addBotMessage('Ocorreu um problema temporário ao analisar seus dados. Por favor, tente novamente.');
+    } finally {
+      _isAiThinking = false;
+      if (aiSend) aiSend.disabled = false;
+      if (aiInput && document.activeElement === aiInput) aiInput.focus();
+      if (_aiMessageQueue.length > 0) {
+        setTimeout(processNextAiQuestion, 50);
+      }
+    }
+  }
+
   function handleConsultorQuestion(question) {
     const chat = document.getElementById('aiChat');
-    if (!chat || !question) return;
+    if (!chat || !question || !question.trim()) return;
+
+    const qClean = question.trim();
 
     // Adiciona mensagem do usuário
     const userMsg = document.createElement('div');
     userMsg.className = 'ai-msg user';
-    userMsg.innerHTML = `<div class="bubble">${escapeHtml(question)}</div>`;
+    userMsg.innerHTML = `<div class="bubble">${escapeHtml(qClean)}</div>`;
     chat.appendChild(userMsg);
-    chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
 
-    showAiTyping();
+    const isNearBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 160;
+    if (isNearBottom) {
+      chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
+    }
 
-    const analysis = window.__currentAiAnalysis;
-    const recs = window.__currentAiRecommendations || [];
-    const qLower = question.toLowerCase();
-
-    setTimeout(async () => {
-      hideAiTyping();
-
-      if (typeof window.PrismaAiEngine?.generateAnswer === 'function') {
-        const engineResult = window.PrismaAiEngine.generateAnswer(question, {
-          receitas: Array.isArray(receitas) ? receitas : [],
-          despesas: Array.isArray(despesas) ? despesas : [],
-          contas: Array.isArray(contas) ? contas : [],
-          investimentos: Array.isArray(investimentos) ? investimentos : [],
-          cartoes: Array.isArray(cartoes) ? cartoes : [],
-          goals: Array.isArray(goals) ? goals : [],
-          periodLabel: aiActivePeriod === '30d' ? 'nos últimos 30 dias' : aiActivePeriod === '90d' ? 'nos últimos 90 dias' : 'neste período'
-        });
-        addBotMessage(engineResult.text);
-        if (engineResult.action?.type === 'generate_pdf') {
-          generateAIPDF();
-        } else if (engineResult.action?.section) {
-          const sectionLink = engineResult.action.section;
-          setTimeout(() => {
-            const target = document.querySelector(`[data-section="${sectionLink}"]`);
-            if (target) target.click();
-          }, 400);
-        }
-      } else if (qLower.includes('analisar') || qLower.includes('gasto') || qLower.includes('análise')) {
-        const res = await runPrismaAiAnalysis(aiActivePeriod, { showBotMessage: false });
-        if (res) {
-          renderProgressiveAnalysisChat(res.analysis, res.recommendations, res.consolidated);
-        } else {
-          addBotMessage('Cadastre suas receitas e despesas para que eu possa gerar a análise financeira completa.');
-        }
-      } else if (qLower.includes('economizar') || qLower.includes('cortar') || qLower.includes('onde')) {
-        if (recs.length > 0) {
-          const top3 = recs.slice(0, 3);
-          const reply = `💡 **Oportunidades de Economia Calculadas:**\n\n` +
-            top3.map((r, i) => `${i + 1}. **${r.titulo}** (${r.categoria}): Economia de **${fmtMoney(r.economiaPotencial)}/mês** (-${r.percentualReducao}%).\n   👉 *Ação:* ${r.acaoRecomendada}`).join('\n\n') +
-            `\n\nAbra o painel **Métricas & Gráficos** acima para ativar essas metas no seu plano!`;
-          addBotMessage(reply);
-        } else {
-          addBotMessage('🎉 Seus gastos estão equilibrados no período selecionado! Não há despesas com indício de excesso no momento.');
-        }
-      } else if (qLower.includes('investimento') || qLower.includes('carteira') || qLower.includes('patrimônio')) {
-        const list = Array.isArray(investimentos) ? investimentos : [];
-        if (!list.length) {
-          addBotMessage('Você ainda não cadastrou ativos na Carteira de Ativos. Acesse a seção Investimentos e registre suas posições para receber recomendações de alocação.');
-        } else {
-          const totalAplicado = list.reduce((sum, inv) => sum + getInvestValorAplicado(inv), 0);
-          const totalAtual = list.reduce((sum, inv) => sum + getInvestValorAtual(inv), 0);
-          const lucro = totalAtual - totalAplicado;
-          const rent = totalAplicado > 0 ? (lucro / totalAplicado) * 100 : 0;
-          const msg = `📈 **Diagnóstico da Carteira de Ativos:**\n\n` +
-            `• Patrimônio investido: **${fmtMoney(totalAtual)}** (aplicado: ${fmtMoney(totalAplicado)})\n` +
-            `• Resultado acumulado: **${lucro >= 0 ? '+' : ''}${fmtMoney(lucro)}** (${rent.toFixed(2)}%)\n` +
-            `• Posições ativas: **${list.length} ativos** cadastrados.\n\n` +
-            `💡 *Dica Prisma AI:* Mantenha sua carteira diversificada entre Renda Fixa e Renda Variável de acordo com seus objetivos.`;
-          addBotMessage(msg);
-        }
-      } else if (qLower.includes('planejar') || qLower.includes('plano') || qLower.includes('meta')) {
-        const metas = Array.isArray(goals) ? goals : [];
-        const msg = `🎯 **Planejamento Financeiro:**\n\n` +
-          `• Metas cadastradas: **${metas.length} objetivos**\n` +
-          (analysis ? `• Taxa de poupança: **${analysis.taxaPoupanca.toFixed(1)}%**\n` : '') +
-          `• Recomendação: priorize sua Reserva de Emergência (equivalente a 6 meses de custos fixos) antes de assumir riscos maiores.\n\n` +
-          `Defina novas metas no menu **Metas** para acompanharmos juntos o seu progresso.`;
-        addBotMessage(msg);
-      } else if (qLower.includes('relatório') || qLower.includes('pdf')) {
-        addBotMessage('📄 Gerando seu relatório executivo em PDF com base nos dados do período...');
-        generateAIPDF();
-      } else {
-        addBotMessage(`Estou à disposição! Você pode usar as ações rápidas acima para analisar gastos, identificar economias, avaliar investimentos, planejar finanças ou gerar relatórios.`);
-      }
-    }, 450);
+    _aiMessageQueue.push({ question: qClean });
+    processNextAiQuestion();
   }
 
   // ==================== INICIALIZAÇÃO E EVENTOS DO PRISMA AI ====================
@@ -13666,6 +14547,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const aiSection = document.getElementById('prisma-ai');
     if (!aiSection || aiSection.dataset.eventsInitialized) return;
     aiSection.dataset.eventsInitialized = '1';
+
+    // Interceptação de cliques em chips e ações dentro do chat
+    const aiChatEl = document.getElementById('aiChat');
+    if (aiChatEl) {
+      aiChatEl.addEventListener('click', (e) => {
+        const chip = e.target.closest('.ai-quick-btn');
+        if (chip && chip.dataset.question) {
+          e.preventDefault();
+          handleConsultorQuestion(chip.dataset.question);
+          return;
+        }
+        const actionBtn = e.target.closest('.ai-action-btn');
+        if (actionBtn && actionBtn.dataset.section) {
+          e.preventDefault();
+          if (typeof window.navigateToSection === 'function') {
+            window.navigateToSection(actionBtn.dataset.section);
+          }
+        }
+      });
+    }
 
     // Toggle Cockpit Drawer (Métricas & Gráficos sob demanda)
     const toggleCockpitBtn = document.getElementById('aiToggleCockpitBtn');
@@ -13687,18 +14588,24 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // Reset Chat Button
+    // Reset Chat Button (com confirmação explícita)
     const resetChatBtn = document.getElementById('aiResetChatBtn');
     if (resetChatBtn) {
       resetChatBtn.addEventListener('click', () => {
+        if (!confirm('Deseja realmente limpar o histórico da conversa com o Prisma AI?')) return;
         const chat = document.getElementById('aiChat');
         if (chat) {
           chat.innerHTML = `
-            <div class="ai-msg bot">
+            <div class="ai-msg bot" aria-live="polite">
               <span class="ai-avatar"><i data-lucide="sparkles"></i></span>
               <div class="bubble">
                 <strong>Olá! Eu sou o Prisma AI.</strong>
                 <p>Seu assistente financeiro pessoal. Como posso ajudar na gestão do seu patrimônio hoje?</p>
+                <div class="ai-chips-group" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;">
+                  <button type="button" class="ai-quick-btn" data-question="Analisar meus gastos">Analisar gastos</button>
+                  <button type="button" class="ai-quick-btn" data-question="Como posso economizar?">Onde economizar?</button>
+                  <button type="button" class="ai-quick-btn" data-question="Qual é o meu saldo?">Meu saldo</button>
+                </div>
               </div>
             </div>
           `;
@@ -13759,8 +14666,8 @@ document.addEventListener('DOMContentLoaded', () => {
           requestAnimationFrame(() => {
             window.aiCategoryChartInstance?.resize?.();
             window.aiComparisonChartInstance?.resize?.();
-            try { if (aiCategoryChartInstance) aiCategoryChartInstance.resize(); } catch (_) {}
-            try { if (aiComparisonChartInstance) aiComparisonChartInstance.resize(); } catch (_) {}
+            try { if (aiCategoryChartInstance) aiCategoryChartInstance.resize(); } catch (_) { }
+            try { if (aiComparisonChartInstance) aiComparisonChartInstance.resize(); } catch (_) { }
           });
         }
       });
@@ -13784,9 +14691,16 @@ document.addEventListener('DOMContentLoaded', () => {
       aiInput.value = '';
       handleConsultorQuestion(text);
     }
-    aiSend?.addEventListener('click', sendAiTextMessage);
-    aiInput?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') sendAiTextMessage();
+    aiSend?.addEventListener('click', (e) => {
+      e.preventDefault();
+      sendAiTextMessage();
+    });
+    aiInput?.addEventListener('keydown', (e) => {
+      if (e.isComposing) return; // Suporte a IME no mobile Android/iOS
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendAiTextMessage();
+      }
     });
 
     // 1. Botões de Período
@@ -13877,7 +14791,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         runPrismaAiAnalysis(aiActivePeriod, { showBotMessage: false });
-        addBotMessage(`🎯 Nova meta personalizada criada: "${title}" com objetivo de economizar ${formatCurrency(amount)}/mês!`);
+        addBotMessage(`Nova meta personalizada criada: "${title}" com objetivo de economizar ${formatCurrency(amount)}/mês!`);
         showToast('✓ Meta personalizada adicionada ao plano!');
       });
     }
@@ -13927,7 +14841,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.initializeCharts = initializeCharts;
   window.getLast12Months = getLast12Months;
 
-  window.renderCashflowChart = function() {
+  window.renderCashflowChart = function () {
     if (cashflowChart) {
       cashflowChart.resize();
       cashflowChart.update();
@@ -13935,7 +14849,7 @@ document.addEventListener('DOMContentLoaded', () => {
       initCashflowChart();
     }
   };
-  window.renderPieChart = function() {
+  window.renderPieChart = function () {
     if (pieChart) {
       pieChart.resize();
       pieChart.update();
@@ -13943,7 +14857,7 @@ document.addEventListener('DOMContentLoaded', () => {
       initPieChart();
     }
   };
-  window.renderIncomePieChart = function() {
+  window.renderIncomePieChart = function () {
     if (incomePieChart) {
       incomePieChart.resize();
       incomePieChart.update();
@@ -13967,10 +14881,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-  
+
   // Initialize months if not already done
   if (!window.months || window.months.length === 0) {
-    window.months = getLast12Months().labels;
+    window.months = getLast12Months().short;
   }
 
   // Inicialização do aplicativo (DOMContentLoaded continua até o fim dos handlers principais)
@@ -13980,7 +14894,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let educationPdfSending = false;
   let educationPdfLastFocused = null;
 
-  function setEducationPdfEmailState(mode, message='') {
+  function setEducationPdfEmailState(mode, message = '') {
     const status = document.getElementById('educationPdfEmailStatus');
     const sendBtn = document.getElementById('educationPdfEmailSend');
     const cancelBtn = document.getElementById('educationPdfEmailCancel');
@@ -14053,7 +14967,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (typeof refreshIcons === 'function') refreshIcons();
     } catch (error) {
       console.error('Erro no envio do PDF:', error);
-      setEducationPdfEmailState('error', '<strong>⚠️ Não foi possível enviar o PDF</strong><br><span>Ocorreu um problema ao tentar enviar o material. Verifique sua conexão e tente novamente.</span>');
+      setEducationPdfEmailState('error', '<strong>Não foi possível enviar o PDF</strong><br><span>Ocorreu um problema ao tentar enviar o material. Verifique sua conexão e tente novamente.</span>');
       const sendBtn = document.getElementById('educationPdfEmailSend');
       if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i data-lucide="refresh-cw"></i> Tentar novamente'; }
       if (typeof refreshIcons === 'function') refreshIcons();
@@ -14063,7 +14977,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function escapeHtmlSafe(value) {
-    return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    return String(value).replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
   }
 
   document.getElementById('educationPdfEmailClose')?.addEventListener('click', closeEducationPdfEmail);
@@ -14088,166 +15002,226 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==================== EDUCAÇÃO FINANCEIRA ====================
   const educationModules = [
-    { id:'orcamento', level:'iniciante', phase:1, pdf:'conteudos/educacao-financeira/01-orcamento-inteligente.pdf', title:'Orçamento inteligente', desc:'Aprenda a organizar receitas, despesas e limites sem complicação.', icon:'wallet', time:'8 min', points:50, lesson:'Um orçamento começa com três perguntas: quanto entra, quanto sai e quanto você quer guardar. Registre receitas e despesas, defina limites por categoria e revise o resultado todo mês.' },
-    { id:'dividas', level:'iniciante', phase:2, pdf:'conteudos/educacao-financeira/02-dividas-sob-controle.pdf', title:'Dívidas sob controle', desc:'Entenda juros, prioridades e estratégias para sair do endividamento.', icon:'shield-alert', time:'10 min', points:60, lesson:'Liste suas dívidas pelo custo dos juros. Priorize as mais caras, evite novas dívidas e negocie quando possível. O objetivo é transformar parcelas e juros em um plano com prazo para terminar.' },
-    { id:'reserva', level:'iniciante', phase:2, pdf:'conteudos/educacao-financeira/03-reserva-de-emergencia.pdf', title:'Reserva de emergência', desc:'Descubra como construir uma proteção financeira para imprevistos.', icon:'umbrella', time:'7 min', points:50, lesson:'A reserva de emergência existe para imprevistos, não para gastos planejados. O tamanho adequado depende da estabilidade da renda e das despesas essenciais. Mantenha o dinheiro acessível e de baixo risco.' },
-    { id:'investir', level:'intermediario', phase:4, pdf:'conteudos/educacao-financeira/04-primeiros-passos-investir.pdf', title:'Primeiros passos para investir', desc:'Conheça risco, liquidez, diversificação e objetivos antes de investir.', icon:'trending-up', time:'12 min', points:70, lesson:'Antes de investir, defina objetivo, prazo e tolerância a perdas. Entenda risco, liquidez e diversificação. Nunca escolha um investimento apenas porque ele promete retorno maior.' },
-    { id:'cartao', level:'iniciante', phase:2, pdf:'conteudos/educacao-financeira/05-cartao-de-credito.pdf', title:'Cartão de crédito', desc:'Use o cartão como ferramenta, evitando juros e perda de controle.', icon:'credit-card', time:'6 min', points:40, lesson:'Cartão não aumenta sua renda: ele antecipa o pagamento. Acompanhe o limite, registre as compras e evite pagar apenas o mínimo da fatura, pois os juros podem crescer rapidamente.' },
-    { id:'metas', level:'intermediario', phase:3, pdf:'conteudos/educacao-financeira/06-metas-e-habitos.pdf', title:'Metas e hábitos', desc:'Transforme objetivos financeiros em planos mensuráveis e sustentáveis.', icon:'target', time:'8 min', points:50, lesson:'Uma boa meta é específica, mensurável e tem prazo. Divida o objetivo em aportes mensais e acompanhe o progresso. Hábitos pequenos e consistentes superam esforços esporádicos.' },
-    { id:'alocacao', level:'avancado', phase:5, pdf:'conteudos/educacao-financeira/07-alocacao-de-ativos.pdf', title:'Alocação de Ativos', desc:'Distribua o patrimônio conforme objetivo, prazo e risco com diversificação consciente.', icon:'pie-chart', time:'14 min', points:80, lesson:'Alocação de ativos define a maior parte do retorno e da volatilidade de uma carteira no longo prazo. Equilibre renda fixa, renda variável e reserva conforme seu horizonte de tempo e capacidade de suportar flutuações.' },
-    { id:'rendafixa', level:'avancado', phase:5, pdf:'conteudos/educacao-financeira/08-renda-fixa-avancada.pdf', title:'Renda Fixa Avançada', desc:'Juros reais, marcação a mercado e comparação entre títulos públicos e privados.', icon:'layers', time:'15 min', points:80, lesson:'Títulos de renda fixa sofrem marcação a mercado quando vendidos antes do vencimento. Compreenda indexadores (Selic, CDI, IPCA+) e a diferença entre emissores soberanos (Tesouro Direto) e de crédito privado (CDBs, LCIs, LCAs, debêntures).' },
-    { id:'acoes', level:'avancado', phase:5, pdf:'conteudos/educacao-financeira/09-acoes-e-fiis.pdf', title:'Ações e Fundos Imobiliários', desc:'Análise de fundamentos, proventos, volatilidade e disciplina em renda variável.', icon:'bar-chart-2', time:'16 min', points:90, lesson:'Investir em ações e FIIs significa tornar-se sócio de negócios e imóveis reais. Foque em indicadores de governança, saúde de fluxo de caixa e consistência de dividendos, mantendo disciplina e aportes periódicos sem tentar prever o mercado a curto prazo.' },
-    { id:'impostos', level:'avancado', phase:6, pdf:'conteudos/educacao-financeira/10-impostos-sobre-investimentos.pdf', title:'Impostos sobre Investimentos', desc:'Tributação de renda fixa, ações e FIIs: pague o devido sem multas nem excessos.', icon:'file-check', time:'12 min', points:70, lesson:'A tributação varia conforme a classe de ativos: tabela regressiva para renda fixa, apuração mensal de DARF e regras de isenção em renda variável, e recolhimento específico sobre ganhos de capital em FIIs. Manter registros organizados evita pendências com o fisco.' },
-    { id:'previdencia', level:'avancado', phase:6, pdf:'conteudos/educacao-financeira/11-protecao-e-previdencia.pdf', title:'Proteção e Previdência', desc:'Proteja renda, família e patrimônio contra eventos de alto impacto e planeje o futuro.', icon:'shield-check', time:'14 min', points:80, lesson:'Planejar o futuro exige proteger o presente. Avalie seguros de vida e invalidez proporcionais à dependência financeira da sua família e escolha com critério entre planos PGBL (com benefício fiscal) ou VGBL, considerando regimes progressivo e regressivo.' },
-    { id:'independencia', level:'avancado', phase:6, pdf:'conteudos/educacao-financeira/12-independencia-financeira.pdf', title:'Independência Financeira', desc:'Planeje a formação do patrimônio gerador de renda que sustentará seu estilo de vida.', icon:'award', time:'18 min', points:100, lesson:'Atingir a independência financeira requer calcular o custo anual de vida e estimar a taxa segura de retirada do patrimônio. O segredo está no controle da taxa de poupança, na consistência de reinvestimento de proventos e na blindagem emocional durante ciclos de crise.' }
+    { id: 'orcamento', level: 'iniciante', phase: 1, pdf: 'conteudos/educacao-financeira/01-orcamento-inteligente.pdf', title: 'Orçamento inteligente', desc: 'Aprenda a organizar receitas, despesas e limites sem complicação.', icon: 'wallet', time: '8 min', points: 50, lesson: 'Um orçamento começa com três perguntas: quanto entra, quanto sai e quanto você quer guardar. Registre receitas e despesas, defina limites por categoria e revise o resultado todo mês.' },
+    { id: 'dividas', level: 'iniciante', phase: 2, pdf: 'conteudos/educacao-financeira/02-dividas-sob-controle.pdf', title: 'Dívidas sob controle', desc: 'Entenda juros, prioridades e estratégias para sair do endividamento.', icon: 'shield-alert', time: '10 min', points: 60, lesson: 'Liste suas dívidas pelo custo dos juros. Priorize as mais caras, evite novas dívidas e negocie quando possível. O objetivo é transformar parcelas e juros em um plano com prazo para terminar.' },
+    { id: 'reserva', level: 'iniciante', phase: 2, pdf: 'conteudos/educacao-financeira/03-reserva-de-emergencia.pdf', title: 'Reserva de emergência', desc: 'Descubra como construir uma proteção financeira para imprevistos.', icon: 'umbrella', time: '7 min', points: 50, lesson: 'A reserva de emergência existe para imprevistos, não para gastos planejados. O tamanho adequado depende da estabilidade da renda e das despesas essenciais. Mantenha o dinheiro acessível e de baixo risco.' },
+    { id: 'investir', level: 'intermediario', phase: 4, pdf: 'conteudos/educacao-financeira/04-primeiros-passos-investir.pdf', title: 'Primeiros passos para investir', desc: 'Conheça risco, liquidez, diversificação e objetivos antes de investir.', icon: 'trending-up', time: '12 min', points: 70, lesson: 'Antes de investir, defina objetivo, prazo e tolerância a perdas. Entenda risco, liquidez e diversificação. Nunca escolha um investimento apenas porque ele promete retorno maior.' },
+    { id: 'cartao', level: 'iniciante', phase: 2, pdf: 'conteudos/educacao-financeira/05-cartao-de-credito.pdf', title: 'Cartão de crédito', desc: 'Use o cartão como ferramenta, evitando juros e perda de controle.', icon: 'credit-card', time: '6 min', points: 40, lesson: 'Cartão não aumenta sua renda: ele antecipa o pagamento. Acompanhe o limite, registre as compras e evite pagar apenas o mínimo da fatura, pois os juros podem crescer rapidamente.' },
+    { id: 'metas', level: 'intermediario', phase: 3, pdf: 'conteudos/educacao-financeira/06-metas-e-habitos.pdf', title: 'Metas e hábitos', desc: 'Transforme objetivos financeiros em planos mensuráveis e sustentáveis.', icon: 'target', time: '8 min', points: 50, lesson: 'Uma boa meta é específica, mensurável e tem prazo. Divida o objetivo em aportes mensais e acompanhe o progresso. Hábitos pequenos e consistentes superam esforços esporádicos.' },
+    { id: 'alocacao', level: 'avancado', phase: 5, pdf: 'conteudos/educacao-financeira/07-alocacao-de-ativos.pdf', title: 'Alocação de Ativos', desc: 'Distribua o patrimônio conforme objetivo, prazo e risco com diversificação consciente.', icon: 'pie-chart', time: '14 min', points: 80, lesson: 'Alocação de ativos define a maior parte do retorno e da volatilidade de uma carteira no longo prazo. Equilibre renda fixa, renda variável e reserva conforme seu horizonte de tempo e capacidade de suportar flutuações.' },
+    { id: 'rendafixa', level: 'avancado', phase: 5, pdf: 'conteudos/educacao-financeira/08-renda-fixa-avancada.pdf', title: 'Renda Fixa Avançada', desc: 'Juros reais, marcação a mercado e comparação entre títulos públicos e privados.', icon: 'layers', time: '15 min', points: 80, lesson: 'Títulos de renda fixa sofrem marcação a mercado quando vendidos antes do vencimento. Compreenda indexadores (Selic, CDI, IPCA+) e a diferença entre emissores soberanos (Tesouro Direto) e de crédito privado (CDBs, LCIs, LCAs, debêntures).' },
+    { id: 'acoes', level: 'avancado', phase: 5, pdf: 'conteudos/educacao-financeira/09-acoes-e-fiis.pdf', title: 'Ações e Fundos Imobiliários', desc: 'Análise de fundamentos, proventos, volatilidade e disciplina em renda variável.', icon: 'bar-chart-2', time: '16 min', points: 90, lesson: 'Investir em ações e FIIs significa tornar-se sócio de negócios e imóveis reais. Foque em indicadores de governança, saúde de fluxo de caixa e consistência de dividendos, mantendo disciplina e aportes periódicos sem tentar prever o mercado a curto prazo.' },
+    { id: 'impostos', level: 'avancado', phase: 6, pdf: 'conteudos/educacao-financeira/10-impostos-sobre-investimentos.pdf', title: 'Impostos sobre Investimentos', desc: 'Tributação de renda fixa, ações e FIIs: pague o devido sem multas nem excessos.', icon: 'file-check', time: '12 min', points: 70, lesson: 'A tributação varia conforme a classe de ativos: tabela regressiva para renda fixa, apuração mensal de DARF e regras de isenção em renda variável, e recolhimento específico sobre ganhos de capital em FIIs. Manter registros organizados evita pendências com o fisco.' },
+    { id: 'previdencia', level: 'avancado', phase: 6, pdf: 'conteudos/educacao-financeira/11-protecao-e-previdencia.pdf', title: 'Proteção e Previdência', desc: 'Proteja renda, família e patrimônio contra eventos de alto impacto e planeje o futuro.', icon: 'shield-check', time: '14 min', points: 80, lesson: 'Planejar o futuro exige proteger o presente. Avalie seguros de vida e invalidez proporcionais à dependência financeira da sua família e escolha com critério entre planos PGBL (com benefício fiscal) ou VGBL, considerando regimes progressivo e regressivo.' },
+    { id: 'independencia', level: 'avancado', phase: 6, pdf: 'conteudos/educacao-financeira/12-independencia-financeira.pdf', title: 'Independência Financeira', desc: 'Planeje a formação do patrimônio gerador de renda que sustentará seu estilo de vida.', icon: 'award', time: '18 min', points: 100, lesson: 'Atingir a independência financeira requer calcular o custo anual de vida e estimar a taxa segura de retirada do patrimônio. O segredo está no controle da taxa de poupança, na consistência de reinvestimento de proventos e na blindagem emocional durante ciclos de crise.' }
   ];
 
   const EDU_PHASES = [
-    { id:1, level:'iniciante', title:'Fundamentos', desc:'Base da educação financeira', modules:['orcamento'] },
-    { id:2, level:'iniciante', title:'Organização', desc:'Orçamento, dívidas e reserva', modules:['dividas','reserva','cartao'] },
-    { id:3, level:'intermediario', title:'Planejamento', desc:'Metas e hábitos sustentáveis', modules:['metas'] },
-    { id:4, level:'intermediario', title:'Investimentos', desc:'Primeiros passos com consciência', modules:['investir'] },
-    { id:5, level:'avancado', title:'Estratégias', desc:'Alocação, renda fixa avançada e renda variável', modules:['alocacao','rendafixa','acoes'] },
-    { id:6, level:'avancado', title:'Gestão patrimonial', desc:'Impostos, proteção e independência', modules:['impostos','previdencia','independencia'] }
+    { id: 1, level: 'iniciante', title: 'Fundamentos', desc: 'Base da educação financeira', modules: ['orcamento'] },
+    { id: 2, level: 'iniciante', title: 'Organização', desc: 'Orçamento, dívidas e reserva', modules: ['dividas', 'reserva', 'cartao'] },
+    { id: 3, level: 'intermediario', title: 'Planejamento', desc: 'Metas e hábitos sustentáveis', modules: ['metas'] },
+    { id: 4, level: 'intermediario', title: 'Investimentos', desc: 'Primeiros passos com consciência', modules: ['investir'] },
+    { id: 5, level: 'avancado', title: 'Estratégias', desc: 'Alocação, renda fixa avançada e renda variável', modules: ['alocacao', 'rendafixa', 'acoes'] },
+    { id: 6, level: 'avancado', title: 'Gestão patrimonial', desc: 'Impostos, proteção e independência', modules: ['impostos', 'previdencia', 'independencia'] }
   ];
 
   const EDU_ACHIEVEMENTS = [
-    { id:'primeiro_quiz', icon:'🎯', name:'Primeiro Quiz', desc:'Conclua seu primeiro quiz' },
-    { id:'mestre_orcamento', icon:'📒', name:'Mestre do Orçamento', desc:'Conclua a trilha de orçamento' },
-    { id:'juros', icon:'📈', name:'Especialista em Juros', desc:'Acerte quizzes de juros' },
-    { id:'investidor', icon:'💼', name:'Investidor Consciente', desc:'Conclua a trilha de investimentos' },
-    { id:'planejador', icon:'🗺️', name:'Planejador Financeiro', desc:'Conclua a trilha de metas' },
-    { id:'diversificacao', icon:'🧩', name:'Mestre da Diversificação', desc:'Acerte quiz de diversificação' },
-    { id:'xp100', icon:'⭐', name:'100 XP', desc:'Acumule 100 pontos' },
-    { id:'xp250', icon:'🏆', name:'250 XP', desc:'Acumule 250 pontos' }
+    { id: 'primeiro_quiz', icon: 'target', name: 'Primeiro Quiz', desc: 'Conclua seu primeiro quiz' },
+    { id: 'mestre_orcamento', icon: 'book-open', name: 'Mestre do Orçamento', desc: 'Conclua a trilha de orçamento' },
+    { id: 'juros', icon: 'trending-up', name: 'Especialista em Juros', desc: 'Acerte quizzes de juros' },
+    { id: 'investidor', icon: 'briefcase', name: 'Investidor Consciente', desc: 'Conclua a trilha de investimentos' },
+    { id: 'planejador', icon: 'map', name: 'Planejador Financeiro', desc: 'Conclua a trilha de metas' },
+    { id: 'diversificacao', icon: 'layers', name: 'Mestre da Diversificação', desc: 'Acerte quiz de diversificação' },
+    { id: 'xp100', icon: 'star', name: '100 XP', desc: 'Acumule 100 pontos' },
+    { id: 'xp250', icon: 'trophy', name: '250 XP', desc: 'Acumule 250 pontos' }
   ];
 
   // 30+ quizzes (id único, nível, tema, questões)
   const EDU_QUIZZES = [
     // INICIANTE (10+)
-    { id:'q_ini_orcamento', level:'iniciante', title:'Orçamento básico', topic:'orcamento', questions:[
-      { q:'Qual é o primeiro passo para montar um orçamento pessoal?', options:['Investir em ações','Registrar receitas e despesas','Pedir aumento de salário','Cancelar todos os cartões'], correct:1, explain:'Sem saber quanto entra e quanto sai, qualquer plano fica no escuro. O registro é a base.' },
-      { q:'Necessidade e desejo diferem porque:', options:['Desejo sempre custa mais','Necessidade é essencial à sobrevivência/rotina; desejo é opcional','Desejos não entram no orçamento','Necessidades não podem ser reduzidas'], correct:1, explain:'Classificar gastos ajuda a priorizar cortes sem comprometer o essencial.' },
-      { q:'Uma pessoa recebe R$ 3.000 e tem despesas essenciais de R$ 1.700. Uma estratégia adequada para o restante seria:', options:['Gastar tudo em lazer, pois já pagou o essencial','Dividir entre reserva, metas e consumos conscientes','Investir 100% em cripto','Ignorar o restante até o fim do mês'], correct:1, explain:'Com margem positiva, faz sentido equilibrar proteção (reserva), objetivos e lazer planejado.' }
-    ]},
-    { id:'q_ini_reserva', level:'iniciante', title:'Reserva de emergência', topic:'reserva', questions:[
-      { q:'Para que serve a reserva de emergência?', options:['Comprar bens de consumo','Cobrir imprevistos sem endividar','Aumentar o limite do cartão','Pagar férias internacionais'], correct:1, explain:'A reserva evita que imprevistos virem dívida cara.' },
-      { q:'Onde costuma ser mais adequado manter a reserva de emergência?', options:['Em ativo de altíssima volatilidade','Em opção com liquidez e baixo risco','Somente em espécie em casa','Em bem imóvel'], correct:1, explain:'Liquidez e segurança importam mais que rentabilidade máxima na reserva.' }
-    ]},
-    { q_id:'q_ini_cartao', id:'q_ini_cartao', level:'iniciante', title:'Cartão de crédito', topic:'cartao', questions:[
-      { q:'Pagar só o mínimo da fatura tende a:', options:['Zerar a dívida rapidamente','Gerar juros altos sobre o saldo restante','Aumentar o score automaticamente','Eliminar anuidade'], correct:1, explain:'O rotativo/parcelamento da fatura costuma ter custo elevado.' },
-      { q:'O cartão de crédito:', options:['Aumenta sua renda','Antecipa poder de compra sobre renda futura','Substitui a necessidade de orçamento','É sempre a melhor forma de pagar'], correct:1, explain:'É crédito, não renda extra.' }
-    ]},
-    { id:'q_ini_dividas', level:'iniciante', title:'Dívidas sob controle', topic:'dividas', questions:[
-      { q:'Ao priorizar dívidas, em geral faz sentido olhar primeiro:', options:['A de menor valor sempre','A com maior custo de juros','A mais antiga sem olhar juros','Qualquer uma, tanto faz'], correct:1, explain:'Reduzir o custo total dos juros acelera a saída do endividamento.' },
-      { q:'Verdadeiro ou falso: renegociar pode ser uma ferramenta útil se reduzir juros ou adequar o fluxo.', options:['Verdadeiro','Falso'], correct:0, explain:'Renegociação bem feita pode melhorar condições, mas deve ser avaliada com números.' }
-    ]},
-    { id:'q_ini_juros', level:'iniciante', title:'Juros simples e compostos', topic:'juros', questions:[
-      { q:'Juros compostos diferem dos simples principalmente porque:', options:['São sempre ilegais','Incidem sobre o valor acumulado (juros sobre juros)','Só existem em poupança','Não dependem do tempo'], correct:1, explain:'No composto, o rendimento de um período entra na base do seguinte.' },
-      { q:'Se uma dívida cobra juros altos e você tem reserva ociosa cara de manter, uma decisão racional pode ser:', options:['Ignorar a dívida','Avaliar quitar ou reduzir a dívida cara','Investir só em ativos de risco máximo','Aumentar o limite do cartão'], correct:1, explain:'Custo da dívida vs. retorno da reserva deve ser comparado com cuidado.' }
-    ]},
-    { id:'q_ini_inflacao', level:'iniciante', title:'Inflação no dia a dia', topic:'inflacao', questions:[
-      { q:'Inflação alta tende a:', options:['Aumentar o poder de compra do dinheiro parado','Reduzir o poder de compra se a renda não acompanhar','Eliminar a necessidade de orçamento','Garantir retornos reais positivos'], correct:1, explain:'Com preços subindo e renda estável, sobra menos no bolso.' },
-      { q:'Retorno real considera:', options:['Só o valor nominal investido','Rendimento descontada a inflação','Apenas o CDI','Somente o IR'], correct:1, explain:'O que importa para o poder de compra é o retorno acima da inflação.' }
-    ]},
-    { id:'q_ini_planejamento', level:'iniciante', title:'Planejamento básico', topic:'planejamento', questions:[
-      { q:'Um plano financeiro útil costuma incluir:', options:['Só investimentos de risco','Receitas, despesas, metas e revisão periódica','Apenas o extrato do cartão','Promessas de enriquecimento rápido'], correct:1, explain:'Planejamento é ciclo contínuo, não um evento único.' },
-      { q:'Verdadeiro ou falso: “guardar o que sobrar” costuma funcionar melhor que definir um valor de poupança primeiro.', options:['Verdadeiro','Falso'], correct:1, explain:'Na prática, definir a poupança como prioridade (pay yourself first) costuma ser mais eficaz.' }
-    ]},
-    { id:'q_ini_necessidades', level:'iniciante', title:'Necessidade vs desejo', topic:'orcamento', questions:[
-      { q:'Qual item costuma ser classificado como desejo (não necessidade básica)?', options:['Aluguel da moradia principal','Alimentação básica','Streaming premium de lazer','Remédios de uso contínuo'], correct:2, explain:'Lazer é importante, mas em geral é flexível frente ao essencial.' },
-      { q:'Cortar desejos antes de necessidades essenciais é:', options:['Sempre um erro','Uma ordem comum de prioridade em aperto orçamentário','Proibido por lei','Inútil'], correct:1, explain:'Em aperto, preserva-se o essencial e revisa-se o discricionário.' }
-    ]},
-    { id:'q_ini_503020', level:'iniciante', title:'Regra 50-30-20', topic:'orcamento', questions:[
-      { q:'Na regra orientativa 50-30-20, os 20% referem-se a:', options:['Impostos','Poupança e objetivos financeiros','Lazer obrigatório','Tarifas bancárias'], correct:1, explain:'Os 20% são direcionados a reserva, dívidas extras ou investimentos conforme o caso.' },
-      { q:'A regra 50-30-20 deve ser vista como:', options:['Lei obrigatória para todos','Referência adaptável à realidade de cada pessoa','Única forma correta de orçar','Garantia de riqueza'], correct:1, explain:'É um guia didático, não uma camisa de força.' }
-    ]},
-    { id:'q_ini_habitos', level:'iniciante', title:'Hábitos financeiros', topic:'metas', questions:[
-      { q:'Um hábito financeiro saudável é:', options:['Revisar extratos e orçamento com regularidade','Nunca olhar o saldo','Usar só o limite do cartão','Copiar investimentos de desconhecidos'], correct:0, explain:'Consistência e acompanhamento batem impulsos isolados.' },
-      { q:'Metas SMART ajudam porque:', options:['Eliminam todo risco','Tornam objetivos específicos e mensuráveis','Garantem retorno de investimento','Substituem a reserva'], correct:1, explain:'Clareza de meta facilita plano de aportes e prazos.' }
-    ]},
+    {
+      id: 'q_ini_orcamento', level: 'iniciante', title: 'Orçamento básico', topic: 'orcamento', questions: [
+        { q: 'Qual é o primeiro passo para montar um orçamento pessoal?', options: ['Investir em ações', 'Registrar receitas e despesas', 'Pedir aumento de salário', 'Cancelar todos os cartões'], correct: 1, explain: 'Sem saber quanto entra e quanto sai, qualquer plano fica no escuro. O registro é a base.' },
+        { q: 'Necessidade e desejo diferem porque:', options: ['Desejo sempre custa mais', 'Necessidade é essencial à sobrevivência/rotina; desejo é opcional', 'Desejos não entram no orçamento', 'Necessidades não podem ser reduzidas'], correct: 1, explain: 'Classificar gastos ajuda a priorizar cortes sem comprometer o essencial.' },
+        { q: 'Uma pessoa recebe R$ 3.000 e tem despesas essenciais de R$ 1.700. Uma estratégia adequada para o restante seria:', options: ['Gastar tudo em lazer, pois já pagou o essencial', 'Dividir entre reserva, metas e consumos conscientes', 'Investir 100% em cripto', 'Ignorar o restante até o fim do mês'], correct: 1, explain: 'Com margem positiva, faz sentido equilibrar proteção (reserva), objetivos e lazer planejado.' }
+      ]
+    },
+    {
+      id: 'q_ini_reserva', level: 'iniciante', title: 'Reserva de emergência', topic: 'reserva', questions: [
+        { q: 'Para que serve a reserva de emergência?', options: ['Comprar bens de consumo', 'Cobrir imprevistos sem endividar', 'Aumentar o limite do cartão', 'Pagar férias internacionais'], correct: 1, explain: 'A reserva evita que imprevistos virem dívida cara.' },
+        { q: 'Onde costuma ser mais adequado manter a reserva de emergência?', options: ['Em ativo de altíssima volatilidade', 'Em opção com liquidez e baixo risco', 'Somente em espécie em casa', 'Em bem imóvel'], correct: 1, explain: 'Liquidez e segurança importam mais que rentabilidade máxima na reserva.' }
+      ]
+    },
+    {
+      q_id: 'q_ini_cartao', id: 'q_ini_cartao', level: 'iniciante', title: 'Cartão de crédito', topic: 'cartao', questions: [
+        { q: 'Pagar só o mínimo da fatura tende a:', options: ['Zerar a dívida rapidamente', 'Gerar juros altos sobre o saldo restante', 'Aumentar o score automaticamente', 'Eliminar anuidade'], correct: 1, explain: 'O rotativo/parcelamento da fatura costuma ter custo elevado.' },
+        { q: 'O cartão de crédito:', options: ['Aumenta sua renda', 'Antecipa poder de compra sobre renda futura', 'Substitui a necessidade de orçamento', 'É sempre a melhor forma de pagar'], correct: 1, explain: 'É crédito, não renda extra.' }
+      ]
+    },
+    {
+      id: 'q_ini_dividas', level: 'iniciante', title: 'Dívidas sob controle', topic: 'dividas', questions: [
+        { q: 'Ao priorizar dívidas, em geral faz sentido olhar primeiro:', options: ['A de menor valor sempre', 'A com maior custo de juros', 'A mais antiga sem olhar juros', 'Qualquer uma, tanto faz'], correct: 1, explain: 'Reduzir o custo total dos juros acelera a saída do endividamento.' },
+        { q: 'Verdadeiro ou falso: renegociar pode ser uma ferramenta útil se reduzir juros ou adequar o fluxo.', options: ['Verdadeiro', 'Falso'], correct: 0, explain: 'Renegociação bem feita pode melhorar condições, mas deve ser avaliada com números.' }
+      ]
+    },
+    {
+      id: 'q_ini_juros', level: 'iniciante', title: 'Juros simples e compostos', topic: 'juros', questions: [
+        { q: 'Juros compostos diferem dos simples principalmente porque:', options: ['São sempre ilegais', 'Incidem sobre o valor acumulado (juros sobre juros)', 'Só existem em poupança', 'Não dependem do tempo'], correct: 1, explain: 'No composto, o rendimento de um período entra na base do seguinte.' },
+        { q: 'Se uma dívida cobra juros altos e você tem reserva ociosa cara de manter, uma decisão racional pode ser:', options: ['Ignorar a dívida', 'Avaliar quitar ou reduzir a dívida cara', 'Investir só em ativos de risco máximo', 'Aumentar o limite do cartão'], correct: 1, explain: 'Custo da dívida vs. retorno da reserva deve ser comparado com cuidado.' }
+      ]
+    },
+    {
+      id: 'q_ini_inflacao', level: 'iniciante', title: 'Inflação no dia a dia', topic: 'inflacao', questions: [
+        { q: 'Inflação alta tende a:', options: ['Aumentar o poder de compra do dinheiro parado', 'Reduzir o poder de compra se a renda não acompanhar', 'Eliminar a necessidade de orçamento', 'Garantir retornos reais positivos'], correct: 1, explain: 'Com preços subindo e renda estável, sobra menos no bolso.' },
+        { q: 'Retorno real considera:', options: ['Só o valor nominal investido', 'Rendimento descontada a inflação', 'Apenas o CDI', 'Somente o IR'], correct: 1, explain: 'O que importa para o poder de compra é o retorno acima da inflação.' }
+      ]
+    },
+    {
+      id: 'q_ini_planejamento', level: 'iniciante', title: 'Planejamento básico', topic: 'planejamento', questions: [
+        { q: 'Um plano financeiro útil costuma incluir:', options: ['Só investimentos de risco', 'Receitas, despesas, metas e revisão periódica', 'Apenas o extrato do cartão', 'Promessas de enriquecimento rápido'], correct: 1, explain: 'Planejamento é ciclo contínuo, não um evento único.' },
+        { q: 'Verdadeiro ou falso: “guardar o que sobrar” costuma funcionar melhor que definir um valor de poupança primeiro.', options: ['Verdadeiro', 'Falso'], correct: 1, explain: 'Na prática, definir a poupança como prioridade (pay yourself first) costuma ser mais eficaz.' }
+      ]
+    },
+    {
+      id: 'q_ini_necessidades', level: 'iniciante', title: 'Necessidade vs desejo', topic: 'orcamento', questions: [
+        { q: 'Qual item costuma ser classificado como desejo (não necessidade básica)?', options: ['Aluguel da moradia principal', 'Alimentação básica', 'Streaming premium de lazer', 'Remédios de uso contínuo'], correct: 2, explain: 'Lazer é importante, mas em geral é flexível frente ao essencial.' },
+        { q: 'Cortar desejos antes de necessidades essenciais é:', options: ['Sempre um erro', 'Uma ordem comum de prioridade em aperto orçamentário', 'Proibido por lei', 'Inútil'], correct: 1, explain: 'Em aperto, preserva-se o essencial e revisa-se o discricionário.' }
+      ]
+    },
+    {
+      id: 'q_ini_503020', level: 'iniciante', title: 'Regra 50-30-20', topic: 'orcamento', questions: [
+        { q: 'Na regra orientativa 50-30-20, os 20% referem-se a:', options: ['Impostos', 'Poupança e objetivos financeiros', 'Lazer obrigatório', 'Tarifas bancárias'], correct: 1, explain: 'Os 20% são direcionados a reserva, dívidas extras ou investimentos conforme o caso.' },
+        { q: 'A regra 50-30-20 deve ser vista como:', options: ['Lei obrigatória para todos', 'Referência adaptável à realidade de cada pessoa', 'Única forma correta de orçar', 'Garantia de riqueza'], correct: 1, explain: 'É um guia didático, não uma camisa de força.' }
+      ]
+    },
+    {
+      id: 'q_ini_habitos', level: 'iniciante', title: 'Hábitos financeiros', topic: 'metas', questions: [
+        { q: 'Um hábito financeiro saudável é:', options: ['Revisar extratos e orçamento com regularidade', 'Nunca olhar o saldo', 'Usar só o limite do cartão', 'Copiar investimentos de desconhecidos'], correct: 0, explain: 'Consistência e acompanhamento batem impulsos isolados.' },
+        { q: 'Metas SMART ajudam porque:', options: ['Eliminam todo risco', 'Tornam objetivos específicos e mensuráveis', 'Garantem retorno de investimento', 'Substituem a reserva'], correct: 1, explain: 'Clareza de meta facilita plano de aportes e prazos.' }
+      ]
+    },
     // INTERMEDIÁRIO (10+)
-    { id:'q_int_compostos', level:'intermediario', title:'Juros compostos na prática', topic:'juros', questions:[
-      { q:'Quanto maior o tempo no juros compostos (com taxa positiva):', options:['Menor o efeito acumulado','Maior tende a ser o efeito acumulado','O tempo não importa','Só importa o valor inicial'], correct:1, explain:'Tempo é um dos motores do composto.' },
-      { q:'CET (custo efetivo total) de um crédito ajuda a:', options:['Esconder tarifas','Comparar o custo real entre ofertas','Calcular só IOF','Definir o score'], correct:1, explain:'CET reúne juros e encargos para comparação.' }
-    ]},
-    { id:'q_int_credito', level:'intermediario', title:'Crédito e financiamentos', topic:'credito', questions:[
-      { q:'Antes de financiar um bem, é prudente avaliar:', options:['Só a parcela mensal','Parcela, prazo, taxa, CET e impacto no orçamento','Apenas a cor do bem','Só a propaganda'], correct:1, explain:'Parcela baixa com prazo longo pode sair cara no total.' },
-      { q:'Empréstimo com taxa muito acima do que você rende em investimentos seguros:', options:['Sempre deve ser maximizado','Merece cautela — o custo pode destruir margem','É sempre melhor que poupar','Não tem relação com o orçamento'], correct:1, explain:'Custo de crédito alto compete com qualquer plano de acumulação.' }
-    ]},
-    { id:'q_int_rf', level:'intermediario', title:'Renda fixa', topic:'investimentos', questions:[
-      { q:'Renda fixa, em geral, caracteriza-se por:', options:['Retorno diário garantido em qualquer cenário','Regras de remuneração conhecidas no momento da aplicação (com ressalvas)','Ausência total de risco','Ser idêntica a ações'], correct:1, explain:'Há risco de crédito, liquidez e marcação a mercado em alguns títulos.' },
-      { q:'Diversificar entre emissores e prazos na renda fixa pode:', options:['Aumentar concentração','Reduzir dependência de um único risco de crédito/prazo','Eliminar impostos','Garantir o CDI+'], correct:1, explain:'Diversificação não elimina risco, mas dilui fontes específicas.' }
-    ]},
-    { id:'q_int_rv', level:'intermediario', title:'Renda variável', topic:'investimentos', questions:[
-      { q:'Ações e FIIs costumam ter:', options:['Rentabilidade fixa mensal garantida','Maior oscilação de preço no curto prazo que a maioria da renda fixa','Zero necessidade de horizonte','Proteção integral do FGC'], correct:1, explain:'Volatilidade é característica central da renda variável.' },
-      { q:'Investir em renda variável sem reserva de emergência pode:', options:['Ser sempre ideal','Forçar venda em mau momento se houver imprevisto','Eliminar o risco de mercado','Aumentar o FGC'], correct:1, explain:'Reserva reduz a chance de liquidar ativos sob pressão.' }
-    ]},
-    { id:'q_int_diversificacao', level:'intermediario', title:'Diversificação', topic:'diversificacao', questions:[
-      { q:'Diversificar a carteira busca principalmente:', options:['Maximizar um único ativo','Evitar concentração excessiva em um fator de risco','Garantir o maior retorno possível','Eliminar a necessidade de estudo'], correct:1, explain:'É gestão de risco, não magia de retorno.' },
-      { q:'Ter 100% em um único ativo:', options:['É o ápice da diversificação','Concentra risco nesse ativo','É exigido por lei','Remove a volatilidade'], correct:1, explain:'Concentração eleva o impacto de um único evento negativo.' }
-    ]},
-    { id:'q_int_risco', level:'intermediario', title:'Gestão de risco', topic:'risco', questions:[
-      { q:'Risco e retorno esperado, em geral:', options:['Não se relacionam','Caminham juntos — maior retorno esperado costuma exigir maior risco','Garantem lucro se o risco for alto','Só existem em cripto'], correct:1, explain:'Não há almoço grátis: retorno extra costuma vir com incerteza extra.' },
-      { q:'Horizonte longo em ativos voláteis:', options:['Elimina totalmente as perdas','Pode ajudar a suportar oscilações de curto prazo','Garante superação da inflação','Torna análise desnecessária'], correct:1, explain:'Tempo ajuda, mas não é garantia.' }
-    ]},
-    { id:'q_int_metas', level:'intermediario', title:'Metas e prazos', topic:'metas', questions:[
-      { q:'Objetivo de curto prazo costuma combinar melhor com:', options:['Ativos de altíssima volatilidade','Maior liquidez e menor oscilação','Somente criptomoedas','Alavancagem máxima'], correct:1, explain:'Prazo curto reduz capacidade de esperar recuperação de preços.' },
-      { q:'Calcular o aporte mensal para uma meta exige:', options:['Apenas o valor do sonho','Valor-alvo, prazo e eventual rentabilidade estimada','Somente o signo do zodíaco','Ignorar a inflação sempre'], correct:1, explain:'Plano quantificado torna a meta executável.' }
-    ]},
-    { id:'q_int_fundos', level:'intermediario', title:'Fundos e ETFs', topic:'investimentos', questions:[
-      { q:'ETFs costumam:', options:['Replicar índices com custo relativamente transparente','Garantir retorno fixo','Eliminar risco de mercado','Ser iguais a CDB'], correct:0, explain:'ETFs facilitam exposição diversificada a um índice, com riscos do próprio índice.' },
-      { q:'Antes de investir em um fundo, é útil olhar:', options:['Só a propaganda','Taxas, estratégia, histórico e adequação ao objetivo','Apenas o nome do gestor famoso','Somente o valor da cota de ontem'], correct:1, explain:'Adequação e custos importam mais que marketing.' }
-    ]},
-    { id:'q_int_independencia', level:'intermediario', title:'Independência financeira', topic:'planejamento', questions:[
-      { q:'Independência financeira está mais relacionada a:', options:['Gastar todo o salário','Construir ativos que sustentem o padrão de vida desejado','Nunca investir','Só aumentar o limite de crédito'], correct:1, explain:'É sobre patrimônio e renda passiva/adequada ao custo de vida.' },
-      { q:'Taxa de poupança elevada ao longo do tempo:', options:['É irrelevante','Acelera a construção de patrimônio, ceteris paribus','Garante ações vencedoras','Substitui qualquer estudo'], correct:1, explain:'Poupar e investir com consistência é alicerce do longo prazo.' }
-    ]},
-    { id:'q_int_cenario', level:'intermediario', title:'Cenário prático', topic:'planejamento', questions:[
-      { q:'João tem reserva de 1 mês de gastos e dívida de cartão a 10% a.m. A prioridade mais sensata costuma ser:', options:['Comprar ações alavancadas','Atacar a dívida cara e fortalecer a reserva','Ignorar ambos','Aumentar desejos'], correct:1, explain:'Juros de cartão nessa magnitude corroem qualquer plano.' },
-      { q:'Verdadeiro ou falso: comparar ofertas de crédito pelo CET é mais completo que olhar só a taxa anunciada.', options:['Verdadeiro','Falso'], correct:0, explain:'CET inclui encargos além da taxa nominal.' }
-    ]},
+    {
+      id: 'q_int_compostos', level: 'intermediario', title: 'Juros compostos na prática', topic: 'juros', questions: [
+        { q: 'Quanto maior o tempo no juros compostos (com taxa positiva):', options: ['Menor o efeito acumulado', 'Maior tende a ser o efeito acumulado', 'O tempo não importa', 'Só importa o valor inicial'], correct: 1, explain: 'Tempo é um dos motores do composto.' },
+        { q: 'CET (custo efetivo total) de um crédito ajuda a:', options: ['Esconder tarifas', 'Comparar o custo real entre ofertas', 'Calcular só IOF', 'Definir o score'], correct: 1, explain: 'CET reúne juros e encargos para comparação.' }
+      ]
+    },
+    {
+      id: 'q_int_credito', level: 'intermediario', title: 'Crédito e financiamentos', topic: 'credito', questions: [
+        { q: 'Antes de financiar um bem, é prudente avaliar:', options: ['Só a parcela mensal', 'Parcela, prazo, taxa, CET e impacto no orçamento', 'Apenas a cor do bem', 'Só a propaganda'], correct: 1, explain: 'Parcela baixa com prazo longo pode sair cara no total.' },
+        { q: 'Empréstimo com taxa muito acima do que você rende em investimentos seguros:', options: ['Sempre deve ser maximizado', 'Merece cautela — o custo pode destruir margem', 'É sempre melhor que poupar', 'Não tem relação com o orçamento'], correct: 1, explain: 'Custo de crédito alto compete com qualquer plano de acumulação.' }
+      ]
+    },
+    {
+      id: 'q_int_rf', level: 'intermediario', title: 'Renda fixa', topic: 'investimentos', questions: [
+        { q: 'Renda fixa, em geral, caracteriza-se por:', options: ['Retorno diário garantido em qualquer cenário', 'Regras de remuneração conhecidas no momento da aplicação (com ressalvas)', 'Ausência total de risco', 'Ser idêntica a ações'], correct: 1, explain: 'Há risco de crédito, liquidez e marcação a mercado em alguns títulos.' },
+        { q: 'Diversificar entre emissores e prazos na renda fixa pode:', options: ['Aumentar concentração', 'Reduzir dependência de um único risco de crédito/prazo', 'Eliminar impostos', 'Garantir o CDI+'], correct: 1, explain: 'Diversificação não elimina risco, mas dilui fontes específicas.' }
+      ]
+    },
+    {
+      id: 'q_int_rv', level: 'intermediario', title: 'Renda variável', topic: 'investimentos', questions: [
+        { q: 'Ações e FIIs costumam ter:', options: ['Rentabilidade fixa mensal garantida', 'Maior oscilação de preço no curto prazo que a maioria da renda fixa', 'Zero necessidade de horizonte', 'Proteção integral do FGC'], correct: 1, explain: 'Volatilidade é característica central da renda variável.' },
+        { q: 'Investir em renda variável sem reserva de emergência pode:', options: ['Ser sempre ideal', 'Forçar venda em mau momento se houver imprevisto', 'Eliminar o risco de mercado', 'Aumentar o FGC'], correct: 1, explain: 'Reserva reduz a chance de liquidar ativos sob pressão.' }
+      ]
+    },
+    {
+      id: 'q_int_diversificacao', level: 'intermediario', title: 'Diversificação', topic: 'diversificacao', questions: [
+        { q: 'Diversificar a carteira busca principalmente:', options: ['Maximizar um único ativo', 'Evitar concentração excessiva em um fator de risco', 'Garantir o maior retorno possível', 'Eliminar a necessidade de estudo'], correct: 1, explain: 'É gestão de risco, não magia de retorno.' },
+        { q: 'Ter 100% em um único ativo:', options: ['É o ápice da diversificação', 'Concentra risco nesse ativo', 'É exigido por lei', 'Remove a volatilidade'], correct: 1, explain: 'Concentração eleva o impacto de um único evento negativo.' }
+      ]
+    },
+    {
+      id: 'q_int_risco', level: 'intermediario', title: 'Gestão de risco', topic: 'risco', questions: [
+        { q: 'Risco e retorno esperado, em geral:', options: ['Não se relacionam', 'Caminham juntos — maior retorno esperado costuma exigir maior risco', 'Garantem lucro se o risco for alto', 'Só existem em cripto'], correct: 1, explain: 'Não há almoço grátis: retorno extra costuma vir com incerteza extra.' },
+        { q: 'Horizonte longo em ativos voláteis:', options: ['Elimina totalmente as perdas', 'Pode ajudar a suportar oscilações de curto prazo', 'Garante superação da inflação', 'Torna análise desnecessária'], correct: 1, explain: 'Tempo ajuda, mas não é garantia.' }
+      ]
+    },
+    {
+      id: 'q_int_metas', level: 'intermediario', title: 'Metas e prazos', topic: 'metas', questions: [
+        { q: 'Objetivo de curto prazo costuma combinar melhor com:', options: ['Ativos de altíssima volatilidade', 'Maior liquidez e menor oscilação', 'Somente criptomoedas', 'Alavancagem máxima'], correct: 1, explain: 'Prazo curto reduz capacidade de esperar recuperação de preços.' },
+        { q: 'Calcular o aporte mensal para uma meta exige:', options: ['Apenas o valor do sonho', 'Valor-alvo, prazo e eventual rentabilidade estimada', 'Somente o signo do zodíaco', 'Ignorar a inflação sempre'], correct: 1, explain: 'Plano quantificado torna a meta executável.' }
+      ]
+    },
+    {
+      id: 'q_int_fundos', level: 'intermediario', title: 'Fundos e ETFs', topic: 'investimentos', questions: [
+        { q: 'ETFs costumam:', options: ['Replicar índices com custo relativamente transparente', 'Garantir retorno fixo', 'Eliminar risco de mercado', 'Ser iguais a CDB'], correct: 0, explain: 'ETFs facilitam exposição diversificada a um índice, com riscos do próprio índice.' },
+        { q: 'Antes de investir em um fundo, é útil olhar:', options: ['Só a propaganda', 'Taxas, estratégia, histórico e adequação ao objetivo', 'Apenas o nome do gestor famoso', 'Somente o valor da cota de ontem'], correct: 1, explain: 'Adequação e custos importam mais que marketing.' }
+      ]
+    },
+    {
+      id: 'q_int_independencia', level: 'intermediario', title: 'Independência financeira', topic: 'planejamento', questions: [
+        { q: 'Independência financeira está mais relacionada a:', options: ['Gastar todo o salário', 'Construir ativos que sustentem o padrão de vida desejado', 'Nunca investir', 'Só aumentar o limite de crédito'], correct: 1, explain: 'É sobre patrimônio e renda passiva/adequada ao custo de vida.' },
+        { q: 'Taxa de poupança elevada ao longo do tempo:', options: ['É irrelevante', 'Acelera a construção de patrimônio, ceteris paribus', 'Garante ações vencedoras', 'Substitui qualquer estudo'], correct: 1, explain: 'Poupar e investir com consistência é alicerce do longo prazo.' }
+      ]
+    },
+    {
+      id: 'q_int_cenario', level: 'intermediario', title: 'Cenário prático', topic: 'planejamento', questions: [
+        { q: 'João tem reserva de 1 mês de gastos e dívida de cartão a 10% a.m. A prioridade mais sensata costuma ser:', options: ['Comprar ações alavancadas', 'Atacar a dívida cara e fortalecer a reserva', 'Ignorar ambos', 'Aumentar desejos'], correct: 1, explain: 'Juros de cartão nessa magnitude corroem qualquer plano.' },
+        { q: 'Verdadeiro ou falso: comparar ofertas de crédito pelo CET é mais completo que olhar só a taxa anunciada.', options: ['Verdadeiro', 'Falso'], correct: 0, explain: 'CET inclui encargos além da taxa nominal.' }
+      ]
+    },
     // AVANÇADO (10+)
-    { id:'q_adv_alocacao', level:'avancado', title:'Alocação de ativos', topic:'alocacao', questions:[
-      { q:'Alocação de ativos busca:', options:['Escolher só o ativo da moda','Distribuir recursos entre classes conforme objetivos e risco','Garantir retorno mínimo legal','Eliminar rebalanceamento'], correct:1, explain:'É a decisão estrutural da carteira.' },
-      { q:'Rebalancear periodicamente serve para:', options:['Aumentar concentração automática','Trazer pesos de volta à política definida','Eliminar IR sempre','Copiar o Ibovespa obrigatoriamente'], correct:1, explain:'Evita que a carteira “ande” para um perfil de risco indesejado.' }
-    ]},
-    { id:'q_adv_volatilidade', level:'avancado', title:'Volatilidade e correlação', topic:'risco', questions:[
-      { q:'Ativos com correlação baixa entre si podem:', options:['Piorar sempre a diversificação','Ajudar a reduzir a volatilidade combinada da carteira','Garantir lucro em crises','Eliminar drawdowns'], correct:1, explain:'Diversificação efetiva depende de não se moverem todos iguais.' },
-      { q:'Volatilidade alta significa:', options:['Retorno garantido alto','Oscilações de preço mais amplas','Risco zero','Isenção de impostos'], correct:1, explain:'Volatilidade mede dispersão, não garante prêmio.' }
-    ]},
-    { id:'q_adv_retorno_real', level:'avancado', title:'Retorno real e inflação', topic:'inflacao', questions:[
-      { q:'Se um investimento rende 10% e a inflação no período foi 6%, o retorno real aproximado é:', options:['16%','4%','10%','6%'], correct:1, explain:'Retorno real ≈ nominal − inflação (aproximação simples).' },
-      { q:'Ignorar a inflação em metas de longo prazo pode:', options:['Superestimar o poder de compra futuro','Não ter efeito algum','Eliminar a necessidade de aportes','Garantir a aposentadoria'], correct:0, explain:'Metas em R$ de hoje precisam de ajuste ou premissas claras.' }
-    ]},
-    { id:'q_adv_tributacao', level:'avancado', title:'Tributação e custos', topic:'tributacao', questions:[
-      { q:'Custos e impostos sobre investimentos:', options:['São irrelevantes no longo prazo','Reduzem o retorno líquido e devem entrar na análise','Aumentam automaticamente o patrimônio','Só existem em ações'], correct:1, explain:'Retorno que importa é o líquido de custos e tributos.' },
-      { q:'Comparar produtos só pelo retorno bruto:', options:['É sempre suficiente','Pode induzir a erro se custos/tributos diferirem','Elimina risco de crédito','É exigido pela CVM para pessoa física'], correct:1, explain:'Bruto ≠ líquido.' }
-    ]},
-    { id:'q_adv_rebalance', level:'avancado', title:'Rebalanceamento', topic:'alocacao', questions:[
-      { q:'Após uma forte alta de uma classe, o peso dela na carteira:', options:['Permanece igual automaticamente','Tende a aumentar, elevando o risco relativo','Cai sempre','Some'], correct:1, explain:'Por isso políticas de rebalanceamento existem.' },
-      { q:'Rebalancear pode envolver:', options:['Só comprar o que mais subiu','Vender o que excedeu o peso-alvo e reforçar o que ficou abaixo','Eliminar toda renda fixa','Zerar a reserva'], correct:1, explain:'É realinhar aos alvos definidos.' }
-    ]},
-    { id:'q_adv_cenarios', level:'avancado', title:'Análise de cenários', topic:'planejamento', questions:[
-      { q:'Testar cenários (otimista, base, estresse) ajuda a:', options:['Prever o futuro com certeza','Entender sensibilidades do plano a choques','Eliminar a necessidade de reserva','Garantir o cenário base'], correct:1, explain:'Preparação ≠ previsão perfeita.' },
-      { q:'Verdadeiro ou falso: projeções de patrimônio futuro são estimativas, não garantias.', options:['Verdadeiro','Falso'], correct:0, explain:'Premissas de taxa e aportes podem não se confirmar.' }
-    ]},
-    { id:'q_adv_aposentadoria', level:'avancado', title:'Planejamento de aposentadoria', topic:'planejamento', questions:[
-      { q:'Planejar aposentadoria envolve tipicamente:', options:['Só o INSS obrigatoriamente como único pilar','Estimativa de gastos futuros, fontes de renda e horizonte','Ignorar a inflação','Concentrar 100% em um único ativo de risco'], correct:1, explain:'É um problema de longo prazo com várias fontes possíveis.' },
-      { q:'Sequência de retornos ruins no início da fase de desacumulação:', options:['Não importa','Pode prejudicar a sustentabilidade da carteira','Garante recuperação imediata','Elimina a necessidade de reserva'], correct:1, explain:'Risco de sequência é crítico na aposentadoria.' }
-    ]},
-    { id:'q_adv_patrimonio', level:'avancado', title:'Gestão patrimonial', topic:'alocacao', questions:[
-      { q:'Gestão patrimonial ampla considera:', options:['Apenas a cotação do dia','Ativos, passivos, objetivos, risco e sucessão','Só a conta corrente','Somente o cartão de crédito'], correct:1, explain:'Visão integral do balanço pessoal/familiar.' },
-      { q:'Concentração excessiva no próprio negócio ou imóvel único:', options:['É sempre diversificação perfeita','Pode representar risco concentrado de patrimônio','Elimina necessidade de liquidez','Garante renda vitalícia'], correct:1, explain:'Risco idiossincrático elevado merece atenção.' }
-    ]},
-    { id:'q_adv_liquidez', level:'avancado', title:'Liquidez e prazos', topic:'risco', questions:[
-      { q:'Ativo ilíquido em necessidade súbita de caixa pode forçar:', options:['Compra automática com desconto','Venda em condições desfavoráveis','Isenção de IR','Aumento do FGC'], correct:1, explain:'Liquidez é parte do risco prático.' },
-      { q:'Casar prazos de objetivos com liquidez dos ativos:', options:['É boa prática de planejamento','É ilegal','Garante retorno real','Elimina volatilidade'], correct:0, explain:'Objetivo de 6 meses ≠ travar em produto de 5 anos sem liquidez.' }
-    ]},
-    { id:'q_adv_estrategia', level:'avancado', title:'Estratégia de longo prazo', topic:'planejamento', questions:[
-      { q:'Disciplina de aportes regulares costuma ser mais relevante do que:', options:['Escolher o “ativo perfeito” uma vez','Ignorar custos','Nunca rebalancear','Concentrar em dicas quentes'], correct:0, explain:'Consistência de aportes e política de investimento tendem a pesar mais que timing perfeito.' },
-      { q:'Verdadeiro ou falso: educação financeira contínua reduz a chance de decisões impulsivas.', options:['Verdadeiro','Falso'], correct:0, explain:'Conhecimento e processo ajudam a filtrar ruído.' }
-    ]}
+    {
+      id: 'q_adv_alocacao', level: 'avancado', title: 'Alocação de ativos', topic: 'alocacao', questions: [
+        { q: 'Alocação de ativos busca:', options: ['Escolher só o ativo da moda', 'Distribuir recursos entre classes conforme objetivos e risco', 'Garantir retorno mínimo legal', 'Eliminar rebalanceamento'], correct: 1, explain: 'É a decisão estrutural da carteira.' },
+        { q: 'Rebalancear periodicamente serve para:', options: ['Aumentar concentração automática', 'Trazer pesos de volta à política definida', 'Eliminar IR sempre', 'Copiar o Ibovespa obrigatoriamente'], correct: 1, explain: 'Evita que a carteira “ande” para um perfil de risco indesejado.' }
+      ]
+    },
+    {
+      id: 'q_adv_volatilidade', level: 'avancado', title: 'Volatilidade e correlação', topic: 'risco', questions: [
+        { q: 'Ativos com correlação baixa entre si podem:', options: ['Piorar sempre a diversificação', 'Ajudar a reduzir a volatilidade combinada da carteira', 'Garantir lucro em crises', 'Eliminar drawdowns'], correct: 1, explain: 'Diversificação efetiva depende de não se moverem todos iguais.' },
+        { q: 'Volatilidade alta significa:', options: ['Retorno garantido alto', 'Oscilações de preço mais amplas', 'Risco zero', 'Isenção de impostos'], correct: 1, explain: 'Volatilidade mede dispersão, não garante prêmio.' }
+      ]
+    },
+    {
+      id: 'q_adv_retorno_real', level: 'avancado', title: 'Retorno real e inflação', topic: 'inflacao', questions: [
+        { q: 'Se um investimento rende 10% e a inflação no período foi 6%, o retorno real aproximado é:', options: ['16%', '4%', '10%', '6%'], correct: 1, explain: 'Retorno real ≈ nominal − inflação (aproximação simples).' },
+        { q: 'Ignorar a inflação em metas de longo prazo pode:', options: ['Superestimar o poder de compra futuro', 'Não ter efeito algum', 'Eliminar a necessidade de aportes', 'Garantir a aposentadoria'], correct: 0, explain: 'Metas em R$ de hoje precisam de ajuste ou premissas claras.' }
+      ]
+    },
+    {
+      id: 'q_adv_tributacao', level: 'avancado', title: 'Tributação e custos', topic: 'tributacao', questions: [
+        { q: 'Custos e impostos sobre investimentos:', options: ['São irrelevantes no longo prazo', 'Reduzem o retorno líquido e devem entrar na análise', 'Aumentam automaticamente o patrimônio', 'Só existem em ações'], correct: 1, explain: 'Retorno que importa é o líquido de custos e tributos.' },
+        { q: 'Comparar produtos só pelo retorno bruto:', options: ['É sempre suficiente', 'Pode induzir a erro se custos/tributos diferirem', 'Elimina risco de crédito', 'É exigido pela CVM para pessoa física'], correct: 1, explain: 'Bruto ≠ líquido.' }
+      ]
+    },
+    {
+      id: 'q_adv_rebalance', level: 'avancado', title: 'Rebalanceamento', topic: 'alocacao', questions: [
+        { q: 'Após uma forte alta de uma classe, o peso dela na carteira:', options: ['Permanece igual automaticamente', 'Tende a aumentar, elevando o risco relativo', 'Cai sempre', 'Some'], correct: 1, explain: 'Por isso políticas de rebalanceamento existem.' },
+        { q: 'Rebalancear pode envolver:', options: ['Só comprar o que mais subiu', 'Vender o que excedeu o peso-alvo e reforçar o que ficou abaixo', 'Eliminar toda renda fixa', 'Zerar a reserva'], correct: 1, explain: 'É realinhar aos alvos definidos.' }
+      ]
+    },
+    {
+      id: 'q_adv_cenarios', level: 'avancado', title: 'Análise de cenários', topic: 'planejamento', questions: [
+        { q: 'Testar cenários (otimista, base, estresse) ajuda a:', options: ['Prever o futuro com certeza', 'Entender sensibilidades do plano a choques', 'Eliminar a necessidade de reserva', 'Garantir o cenário base'], correct: 1, explain: 'Preparação ≠ previsão perfeita.' },
+        { q: 'Verdadeiro ou falso: projeções de patrimônio futuro são estimativas, não garantias.', options: ['Verdadeiro', 'Falso'], correct: 0, explain: 'Premissas de taxa e aportes podem não se confirmar.' }
+      ]
+    },
+    {
+      id: 'q_adv_aposentadoria', level: 'avancado', title: 'Planejamento de aposentadoria', topic: 'planejamento', questions: [
+        { q: 'Planejar aposentadoria envolve tipicamente:', options: ['Só o INSS obrigatoriamente como único pilar', 'Estimativa de gastos futuros, fontes de renda e horizonte', 'Ignorar a inflação', 'Concentrar 100% em um único ativo de risco'], correct: 1, explain: 'É um problema de longo prazo com várias fontes possíveis.' },
+        { q: 'Sequência de retornos ruins no início da fase de desacumulação:', options: ['Não importa', 'Pode prejudicar a sustentabilidade da carteira', 'Garante recuperação imediata', 'Elimina a necessidade de reserva'], correct: 1, explain: 'Risco de sequência é crítico na aposentadoria.' }
+      ]
+    },
+    {
+      id: 'q_adv_patrimonio', level: 'avancado', title: 'Gestão patrimonial', topic: 'alocacao', questions: [
+        { q: 'Gestão patrimonial ampla considera:', options: ['Apenas a cotação do dia', 'Ativos, passivos, objetivos, risco e sucessão', 'Só a conta corrente', 'Somente o cartão de crédito'], correct: 1, explain: 'Visão integral do balanço pessoal/familiar.' },
+        { q: 'Concentração excessiva no próprio negócio ou imóvel único:', options: ['É sempre diversificação perfeita', 'Pode representar risco concentrado de patrimônio', 'Elimina necessidade de liquidez', 'Garante renda vitalícia'], correct: 1, explain: 'Risco idiossincrático elevado merece atenção.' }
+      ]
+    },
+    {
+      id: 'q_adv_liquidez', level: 'avancado', title: 'Liquidez e prazos', topic: 'risco', questions: [
+        { q: 'Ativo ilíquido em necessidade súbita de caixa pode forçar:', options: ['Compra automática com desconto', 'Venda em condições desfavoráveis', 'Isenção de IR', 'Aumento do FGC'], correct: 1, explain: 'Liquidez é parte do risco prático.' },
+        { q: 'Casar prazos de objetivos com liquidez dos ativos:', options: ['É boa prática de planejamento', 'É ilegal', 'Garante retorno real', 'Elimina volatilidade'], correct: 0, explain: 'Objetivo de 6 meses ≠ travar em produto de 5 anos sem liquidez.' }
+      ]
+    },
+    {
+      id: 'q_adv_estrategia', level: 'avancado', title: 'Estratégia de longo prazo', topic: 'planejamento', questions: [
+        { q: 'Disciplina de aportes regulares costuma ser mais relevante do que:', options: ['Escolher o “ativo perfeito” uma vez', 'Ignorar custos', 'Nunca rebalancear', 'Concentrar em dicas quentes'], correct: 0, explain: 'Consistência de aportes e política de investimento tendem a pesar mais que timing perfeito.' },
+        { q: 'Verdadeiro ou falso: educação financeira contínua reduz a chance de decisões impulsivas.', options: ['Verdadeiro', 'Falso'], correct: 0, explain: 'Conhecimento e processo ajudam a filtrar ruído.' }
+      ]
+    }
   ];
 
   let eduLevelFilter = 'todos';
@@ -14298,10 +15272,12 @@ document.addEventListener('DOMContentLoaded', () => {
     grid.innerHTML = EDU_ACHIEVEMENTS.map(achievement => {
       const isUnlocked = unlocked.has(achievement.id);
       return `<div class="edu-ach ${isUnlocked ? 'unlocked' : ''}" title="${achievement.desc}" aria-label="${achievement.name}: ${isUnlocked ? 'conquistada' : 'bloqueada'}">
-        <div class="ea-icon" aria-hidden="true">${achievement.icon}</div>
+        <div class="ea-icon" aria-hidden="true"><i data-lucide="${achievement.icon || 'award'}"></i></div>
         <div class="ea-name">${achievement.name}</div>
+        <div class="ea-desc">${achievement.desc || ''}</div>
       </div>`;
     }).join('');
+    if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
   }
 
   function isPhaseUnlocked(phaseId, data) {
@@ -14805,9 +15781,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const rs = parseEduMoney(document.getElementById('eduRealSave')?.value);
       const msgs = [];
       if (income > 0) {
-        if (rn / income > 0.5) msgs.push({ t: 'warn', m: '⚠️ Seus gastos essenciais estão acima da referência de 50%.' });
-        if (rw / income > 0.3) msgs.push({ t: 'tip', m: '💡 Seus gastos com desejos estão acima da referência de 30%.' });
-        if (rs / income < 0.2) msgs.push({ t: 'tip', m: '🎯 Você está destinando menos que a referência de 20% para objetivos financeiros.' });
+        if (rn / income > 0.5) msgs.push({ t: 'warn', m: 'Seus gastos essenciais estão acima da referência de 50%.' });
+        if (rw / income > 0.3) msgs.push({ t: 'tip', m: 'Seus gastos com desejos estão acima da referência de 30%.' });
+        if (rs / income < 0.2) msgs.push({ t: 'tip', m: 'Você está destinando menos que a referência de 20% para objetivos financeiros.' });
         if (!msgs.length) msgs.push({ t: 'ok', m: '✅ Sua distribuição está alinhada à referência orientativa 50-30-20.' });
       }
       alerts.innerHTML = msgs.map(x => `<div class="edu-alert ${x.t}">${x.m}</div>`).join('');
@@ -14937,6 +15913,36 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const quizSel = document.getElementById('eduQuizLevelSelect');
     if (quizSel) quizSel.addEventListener('change', renderEduQuizList);
+
+    // Abas do modal de Quizzes / Desafio / Conquistas
+    const quizTabs = document.querySelectorAll('.edu-quiz-tab[data-edu-tab]');
+    if (quizTabs.length) {
+      quizTabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          const key = tab.getAttribute('data-edu-tab');
+          quizTabs.forEach((t) => {
+            t.classList.toggle('active', t === tab);
+            t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+          });
+          const panes = {
+            quizzes: document.getElementById('eduPaneQuizzes'),
+            desafio: document.getElementById('eduPaneDesafio'),
+            conquistas: document.getElementById('eduPaneConquistas')
+          };
+          Object.keys(panes).forEach((k) => {
+            const el = panes[k];
+            if (!el) return;
+            const on = k === key;
+            el.classList.toggle('active', on);
+            el.hidden = !on;
+          });
+          if (key === 'conquistas' && typeof renderEduAchievements === 'function') renderEduAchievements();
+          if (key === 'quizzes' && typeof renderEduQuizList === 'function') renderEduQuizList();
+          if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
+        });
+      });
+    }
+
     const quizNext = document.getElementById('eduQuizNext');
     if (quizNext) quizNext.addEventListener('click', () => {
       if (!currentQuiz) return;
@@ -14997,7 +16003,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const oldBtn = document.getElementById('educationSimulateBtn');
     if (oldBtn) oldBtn.addEventListener('click', updateEduSimulator);
-    ['eduRealNeeds','eduRealWants','eduRealSave','eduProjTaxa'].forEach(id => {
+    ['eduRealNeeds', 'eduRealWants', 'eduRealSave', 'eduProjTaxa'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('input', updateEduSimulator);
     });
@@ -15014,19 +16020,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (insightBtn) insightBtn.addEventListener('click', () => {
       const d = (typeof despesas !== 'undefined') ? despesas : [];
       const r = (typeof receitas !== 'undefined') ? receitas : [];
-      const income = r.reduce((s,x)=>s+Number(x.valor||0),0);
-      const expense = d.reduce((s,x)=>s+Number(x.valor||0),0);
+      const income = r.reduce((s, x) => s + Number(x.valor || 0), 0);
+      const expense = d.reduce((s, x) => s + Number(x.valor || 0), 0);
       const title = document.getElementById('educationInsightTitle');
       const text = document.getElementById('educationInsightText');
       if (income && expense > income) {
-        if(title) title.textContent='Priorize o equilíbrio';
-        if(text) text.textContent='Se as despesas estão acima das receitas, o primeiro passo é reduzir gastos e reorganizar o orçamento antes de pensar em aumentar o risco.';
+        if (title) title.textContent = 'Priorize o equilíbrio';
+        if (text) text.textContent = 'Se as despesas estão acima das receitas, o primeiro passo é reduzir gastos e reorganizar o orçamento antes de pensar em aumentar o risco.';
       } else if (income && expense / income > .8) {
-        if(title) title.textContent='Aumente sua margem';
-        if(text) text.textContent='Seu orçamento parece apertado. Procure criar uma margem mensal antes de acelerar metas e investimentos.';
+        if (title) title.textContent = 'Aumente sua margem';
+        if (text) text.textContent = 'Seu orçamento parece apertado. Procure criar uma margem mensal antes de acelerar metas e investimentos.';
       } else {
-        if(title) title.textContent='Você tem espaço para avançar';
-        if(text) text.textContent='Com uma margem positiva, você pode direcionar parte dela para reserva, metas e investimentos de acordo com seus objetivos.';
+        if (title) title.textContent = 'Você tem espaço para avançar';
+        if (text) text.textContent = 'Com uma margem positiva, você pode direcionar parte dela para reserva, metas e investimentos de acordo com seus objetivos.';
       }
     });
   }
@@ -15037,449 +16043,539 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-/* =========================================================
-   NOTIFICAÇÕES — painel funcional e indicador de não lidas
-   ========================================================= */
-(function initNotifications(){
-  const STORAGE_KEY = 'prisma_notifications_v2';
-  const button = document.getElementById('notificationBtn') || document.querySelector('.notification-btn');
-  const panel = document.getElementById('notificationsPanel');
-  const list = document.getElementById('notificationsList');
-  const empty = document.getElementById('notificationsEmpty');
-  const summary = document.getElementById('notificationsSummary');
-  const markRead = document.getElementById('markNotificationsRead');
-  let currentView = 'active';
-  let toolbar;
-  let activeTab;
-  let trashTab;
-  let clearTrashButton;
-  let trashList;
-  let trashEmpty;
+  /* =========================================================
+     NOTIFICAÇÕES — painel funcional e indicador de não lidas
+     ========================================================= */
+  (function initNotifications() {
+    const STORAGE_KEY = 'prisma_notifications_v2';
+    const button = document.getElementById('notificationBtn') || document.querySelector('.notification-btn');
+    const panel = document.getElementById('notificationsPanel');
+    const list = document.getElementById('notificationsList');
+    const empty = document.getElementById('notificationsEmpty');
+    const summary = document.getElementById('notificationsSummary');
+    const markRead = document.getElementById('markNotificationsRead');
+    let currentView = 'active';
+    let toolbar;
+    let activeTab;
+    let trashTab;
+    let clearTrashButton;
+    let trashList;
+    let trashEmpty;
 
-  function readState(){
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      const notifications = Array.isArray(parsed.notifications) ? parsed.notifications.filter((item) => item && typeof item === 'object') : [];
-      return { notifications };
-    } catch(e) {
-      console.error('Falha ao carregar as notificações:', e);
-      if (typeof window.showToast === 'function') window.showToast('Não foi possível carregar as notificações salvas.');
-      return null;
+    function readState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        const notifications = Array.isArray(parsed.notifications) ? parsed.notifications.filter((item) => item && typeof item === 'object') : [];
+        return { notifications };
+      } catch (e) {
+        console.error('Falha ao carregar as notificações:', e);
+        if (typeof window.showToast === 'function') window.showToast('Não foi possível carregar as notificações salvas.');
+        return null;
+      }
     }
-  }
-  function saveState(state){
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      if (typeof scheduleServerSync === 'function') scheduleServerSync();
-      return true;
-    } catch(e) {
-      console.error('Falha ao salvar as notificações:', e);
-      if (typeof window.showToast === 'function') window.showToast('Não foi possível salvar a alteração das notificações.');
-      return false;
+    function saveState(state) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        if (typeof scheduleServerSync === 'function') scheduleServerSync();
+        return true;
+      } catch (e) {
+        console.error('Falha ao salvar as notificações:', e);
+        if (typeof window.showToast === 'function') window.showToast('Não foi possível salvar a alteração das notificações.');
+        return false;
+      }
     }
-  }
-  function unreadCount(state){ return state.notifications.filter(n => !n.deletedAt && !n.read).length; }
-  function escapeHTML(value){
-    return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
-  }
-  function relativeDate(value){
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return '';
-    const diff = Math.max(0, Date.now()-d.getTime());
-    const mins=Math.floor(diff/60000), hours=Math.floor(diff/3600000), days=Math.floor(diff/86400000);
-    if(mins<1) return 'agora'; if(mins<60) return `há ${mins} min`; if(hours<24) return `há ${hours}h`; if(days<7) return `há ${days}d`;
-    return d.toLocaleDateString('pt-BR');
-  }
-  function exactDate(value){
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('pt-BR');
-  }
-  function renderItems(items, isDeleted){
-    return items.map((n) => {
-      const id = escapeHTML(n.id);
-      const type = escapeHTML(n.type || 'info');
-      const date = exactDate(n.date || n.createdAt);
-      const actions = isDeleted
-        ? `<button type="button" class="notification-action" data-notification-action="restore" data-notification-id="${id}" aria-label="Restaurar ${escapeHTML(n.title || 'notificação')}">Restaurar</button><button type="button" class="notification-action danger" data-notification-action="delete" data-notification-id="${id}" aria-label="Excluir definitivamente ${escapeHTML(n.title || 'notificação')}">Excluir</button>`
-        : `<button type="button" class="notification-action" data-notification-action="dismiss" data-notification-id="${id}" aria-label="Mover ${escapeHTML(n.title || 'notificação')} para a lixeira">Dispensar</button>`;
-      return `<article class="notification-item ${n.read ? 'read' : 'unread'} notification-type-${type}" data-notification-id="${id}" ${isDeleted ? 'data-deleted="true"' : ''}>
+    function unreadCount(state) { return state.notifications.filter(n => !n.deletedAt && !n.read).length; }
+    function escapeHTML(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch]));
+    }
+    function relativeDate(value) {
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '';
+      const diff = Math.max(0, Date.now() - d.getTime());
+      const mins = Math.floor(diff / 60000), hours = Math.floor(diff / 3600000), days = Math.floor(diff / 86400000);
+      if (mins < 1) return 'agora'; if (mins < 60) return `há ${mins} min`; if (hours < 24) return `há ${hours}h`; if (days < 7) return `há ${days}d`;
+      return d.toLocaleDateString('pt-BR');
+    }
+    function exactDate(value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('pt-BR');
+    }
+    function renderItems(items, isDeleted) {
+      return items.map((n) => {
+        const id = escapeHTML(n.id);
+        const type = escapeHTML(n.type || 'info');
+        const date = exactDate(n.date || n.createdAt);
+        const actions = isDeleted
+          ? `<button type="button" class="notification-action" data-notification-action="restore" data-notification-id="${id}" aria-label="Restaurar ${escapeHTML(n.title || 'notificação')}">Restaurar</button><button type="button" class="notification-action danger" data-notification-action="delete" data-notification-id="${id}" aria-label="Excluir definitivamente ${escapeHTML(n.title || 'notificação')}">Excluir</button>`
+          : `<button type="button" class="notification-action" data-notification-action="dismiss" data-notification-id="${id}" aria-label="Mover ${escapeHTML(n.title || 'notificação')} para a lixeira">Dispensar</button>`;
+        return `<article class="notification-item ${n.read ? 'read' : 'unread'} notification-type-${type}" data-notification-id="${id}" ${isDeleted ? 'data-deleted="true"' : ''}>
         <span class="notification-item-icon"><i data-lucide="${escapeHTML(n.icon || 'bell')}"></i></span>
         <span class="notification-item-content"><strong>${escapeHTML(n.title || 'Notificação')}</strong><span>${escapeHTML(n.message || '')}</span><small>${escapeHTML(date)}${!isDeleted && date ? ` · ${relativeDate(n.date || n.createdAt)}` : ''}${isDeleted && n.deletedAt ? ` · Excluída ${escapeHTML(exactDate(n.deletedAt))}` : ''}</small>
         <span class="notification-item-actions">${actions}</span></span>${!n.read && !isDeleted ? '<span class="notification-unread-dot" aria-label="Não lida"></span>' : ''}
       </article>`;
-    }).join('');
-  }
-  function setupControls(){
-    if (!panel || !list || toolbar) return;
+      }).join('');
+    }
+    function setupControls() {
+      if (!panel || !list || toolbar) return;
 
-    toolbar = document.createElement('div');
-    toolbar.className = 'notifications-toolbar';
-    toolbar.setAttribute('role', 'tablist');
-    toolbar.setAttribute('aria-label', 'Visualização de notificações');
+      toolbar = document.createElement('div');
+      toolbar.className = 'notifications-toolbar';
+      toolbar.setAttribute('role', 'tablist');
+      toolbar.setAttribute('aria-label', 'Visualização de notificações');
 
-    activeTab = document.createElement('button');
-    activeTab.type = 'button';
-    activeTab.className = 'notifications-tab';
-    activeTab.setAttribute('role', 'tab');
-    activeTab.addEventListener('click', () => { currentView = 'active'; updateUI(); });
+      activeTab = document.createElement('button');
+      activeTab.type = 'button';
+      activeTab.className = 'notifications-tab';
+      activeTab.setAttribute('role', 'tab');
+      activeTab.addEventListener('click', () => { currentView = 'active'; updateUI(); });
 
-    trashTab = document.createElement('button');
-    trashTab.type = 'button';
-    trashTab.className = 'notifications-tab';
-    trashTab.setAttribute('role', 'tab');
-    trashTab.addEventListener('click', () => { currentView = 'trash'; updateUI(); });
+      trashTab = document.createElement('button');
+      trashTab.type = 'button';
+      trashTab.className = 'notifications-tab';
+      trashTab.setAttribute('role', 'tab');
+      trashTab.addEventListener('click', () => { currentView = 'trash'; updateUI(); });
 
-    clearTrashButton = document.createElement('button');
-    clearTrashButton.type = 'button';
-    clearTrashButton.className = 'notifications-clear-trash';
-    clearTrashButton.textContent = 'Esvaziar lixeira';
-    clearTrashButton.addEventListener('click', () => {
+      clearTrashButton = document.createElement('button');
+      clearTrashButton.type = 'button';
+      clearTrashButton.className = 'notifications-clear-trash';
+      clearTrashButton.textContent = 'Esvaziar lixeira';
+      clearTrashButton.addEventListener('click', () => {
+        const state = readState();
+        if (!state || !state.notifications.some((n) => n.deletedAt)) return;
+        if (!window.confirm('Excluir permanentemente todas as notificações da lixeira? Esta ação não pode ser desfeita.')) return;
+        state.notifications = state.notifications.filter((n) => !n.deletedAt);
+        if (saveState(state)) {
+          updateUI();
+          if (typeof window.showToast === 'function') window.showToast('Lixeira esvaziada.');
+        }
+      });
+
+      toolbar.append(activeTab, trashTab, clearTrashButton);
+      panel.insertBefore(toolbar, list);
+
+      trashList = document.createElement('div');
+      trashList.className = 'notifications-list';
+      trashList.id = 'notificationsTrashList';
+      trashList.hidden = true;
+      trashList.setAttribute('aria-label', 'Notificações na lixeira');
+      panel.insertBefore(trashList, empty);
+
+      trashEmpty = document.createElement('div');
+      trashEmpty.className = 'notifications-empty';
+      trashEmpty.hidden = true;
+      trashEmpty.innerHTML = '<i data-lucide="trash-2"></i><strong>Lixeira vazia</strong><span>Notificações dispensadas aparecerão aqui.</span>';
+      panel.appendChild(trashEmpty);
+    }
+    function updateUI() {
+      setupControls();
       const state = readState();
-      if (!state || !state.notifications.some((n) => n.deletedAt)) return;
-      if (!window.confirm('Excluir permanentemente todas as notificações da lixeira? Esta ação não pode ser desfeita.')) return;
-      state.notifications = state.notifications.filter((n) => !n.deletedAt);
+      if (!state) return;
+      const active = state.notifications.filter((n) => !n.deletedAt);
+      const trashed = state.notifications.filter((n) => Boolean(n.deletedAt));
+      const unread = unreadCount(state);
+      if (button) {
+        button.classList.toggle('has-unread', unread > 0);
+        button.setAttribute('aria-label', unread ? `Notificações, ${unread} não lida${unread === 1 ? '' : 's'}` : 'Notificações');
+        button.setAttribute('aria-expanded', panel && !panel.hidden ? 'true' : 'false');
+        const dot = button.querySelector('.notification-dot');
+        if (dot) {
+          dot.hidden = unread === 0;
+          dot.textContent = unread > 9 ? '9+' : String(unread);
+        }
+      }
+      if (summary) summary.textContent = currentView === 'trash'
+        ? `${trashed.length} ${trashed.length === 1 ? 'notificação' : 'notificações'} na lixeira`
+        : unread ? `${unread} não lida${unread === 1 ? '' : 's'} · ${active.length} ${active.length === 1 ? 'notificação' : 'notificações'}` : `${active.length} ${active.length === 1 ? 'notificação' : 'notificações'} · nenhuma nova`;
+      if (list) {
+        list.innerHTML = renderItems(active, false);
+        list.hidden = currentView !== 'active' || !active.length;
+      }
+      if (empty) {
+        empty.hidden = currentView !== 'active' || active.length > 0;
+        const title = empty.querySelector('strong');
+        const message = empty.querySelector('span');
+        if (title) title.textContent = 'Tudo em dia';
+        if (message) message.textContent = 'Você não tem notificações novas.';
+      }
+      if (trashList) {
+        trashList.innerHTML = renderItems(trashed, true);
+        trashList.hidden = currentView !== 'trash' || !trashed.length;
+      }
+      if (trashEmpty) trashEmpty.hidden = currentView !== 'trash' || trashed.length > 0;
+      if (activeTab && trashTab && toolbar) {
+        activeTab.textContent = `Notificações (${active.length})`;
+        trashTab.textContent = `Lixeira (${trashed.length})`;
+        activeTab.setAttribute('aria-selected', String(currentView === 'active'));
+        trashTab.setAttribute('aria-selected', String(currentView === 'trash'));
+        activeTab.tabIndex = currentView === 'active' ? 0 : -1;
+        trashTab.tabIndex = currentView === 'trash' ? 0 : -1;
+        clearTrashButton.hidden = currentView !== 'trash';
+        clearTrashButton.disabled = trashed.length === 0;
+      }
+      if (markRead) {
+        markRead.disabled = unread === 0 || currentView !== 'active';
+        markRead.hidden = currentView !== 'active';
+      }
+      if (window.lucide) window.lucide.createIcons();
+    }
+    function openPanel() {
+      if (!panel) return;
+      panel.hidden = false; panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false');
+      if (button) button.setAttribute('aria-expanded', 'true');
+      let bd = document.getElementById('notificationsBackdrop');
+      if (!bd) {
+        bd = document.createElement('div');
+        bd.id = 'notificationsBackdrop';
+        bd.className = 'notifications-backdrop';
+        bd.addEventListener('click', () => closePanel());
+        document.body.appendChild(bd);
+      }
+      bd.hidden = false;
+      document.body.classList.add('prisma-notif-open');
+      updateUI();
+    }
+    function closePanel() {
+      if (!panel) return;
+      panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true'); panel.hidden = true;
+      if (button) button.setAttribute('aria-expanded', 'false');
+      const bd = document.getElementById('notificationsBackdrop');
+      if (bd) bd.hidden = true;
+      document.body.classList.remove('prisma-notif-open');
+    }
+    function markAllRead() {
+      const state = readState(); if (!state) return;
+      state.notifications = state.notifications.map(n => n.deletedAt ? n : { ...n, read: true });
+      if (saveState(state)) updateUI();
+    }
+    function markOneRead(id) {
+      const state = readState(); if (!state) return;
+      state.notifications = state.notifications.map(n => String(n.id) === String(id) && !n.deletedAt ? { ...n, read: true } : n);
+      if (saveState(state)) updateUI();
+    }
+    function addNotification(notification) {
+      const state = readState(); if (!state) return;
+      const item = { id: notification?.id || `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, title: notification?.title || 'Nova notificação', message: notification?.message || '', date: notification?.date || new Date().toISOString(), icon: notification?.icon || 'bell', read: false };
+      if (state.notifications.some(n => String(n.id) === String(item.id))) return;
+      state.notifications = [item, ...state.notifications].slice(0, 100);
+      if (saveState(state)) updateUI();
+    }
+    function updateNotification(id, operation) {
+      const state = readState(); if (!state) return;
+      const target = state.notifications.find((n) => String(n.id) === String(id));
+      if (!target) return;
+      if (operation === 'dismiss') {
+        if (target.deletedAt) return;
+        target.deletedAt = new Date().toISOString();
+      } else if (operation === 'restore') {
+        if (!target.deletedAt) return;
+        delete target.deletedAt;
+      } else if (operation === 'delete') {
+        if (!target.deletedAt || !window.confirm('Excluir permanentemente esta notificação? Esta ação não pode ser desfeita.')) return;
+        state.notifications = state.notifications.filter((n) => String(n.id) !== String(id));
+      }
       if (saveState(state)) {
         updateUI();
-        if (typeof window.showToast === 'function') window.showToast('Lixeira esvaziada.');
+        if (typeof window.showToast === 'function') {
+          window.showToast(operation === 'dismiss' ? 'Notificação movida para a lixeira.' : operation === 'restore' ? 'Notificação restaurada.' : 'Notificação excluída definitivamente.');
+        }
       }
+    }
+    if (button) {
+      button.addEventListener('click', e => {
+        e.stopPropagation();
+        if (window.PrismaNavbar) window.PrismaNavbar.toggle('notifications');
+        else if (panel?.hidden) openPanel();
+        else closePanel();
+      });
+    }
+    if (markRead) markRead.addEventListener('click', e => { e.preventDefault(); markAllRead(); });
+    if (list) list.addEventListener('click', e => {
+      const action = e.target.closest('[data-notification-action]');
+      if (action) {
+        e.preventDefault();
+        e.stopPropagation();
+        updateNotification(action.dataset.notificationId, action.dataset.notificationAction);
+        return;
+      }
+      const item = e.target.closest('[data-notification-id]');
+      if (item) markOneRead(item.dataset.notificationId);
     });
-
-    toolbar.append(activeTab, trashTab, clearTrashButton);
-    panel.insertBefore(toolbar, list);
-
-    trashList = document.createElement('div');
-    trashList.className = 'notifications-list';
-    trashList.id = 'notificationsTrashList';
-    trashList.hidden = true;
-    trashList.setAttribute('aria-label', 'Notificações na lixeira');
-    panel.insertBefore(trashList, empty);
-
-    trashEmpty = document.createElement('div');
-    trashEmpty.className = 'notifications-empty';
-    trashEmpty.hidden = true;
-    trashEmpty.innerHTML = '<i data-lucide="trash-2"></i><strong>Lixeira vazia</strong><span>Notificações dispensadas aparecerão aqui.</span>';
-    panel.appendChild(trashEmpty);
-  }
-  function updateUI(){
-    setupControls();
-    const state=readState();
-    if (!state) return;
-    const active = state.notifications.filter((n) => !n.deletedAt);
-    const trashed = state.notifications.filter((n) => Boolean(n.deletedAt));
-    const unread=unreadCount(state);
-    if(button){
-      button.classList.toggle('has-unread',unread>0);
-      button.setAttribute('aria-label',unread ? `Notificações, ${unread} não lida${unread===1?'':'s'}` : 'Notificações');
-      button.setAttribute('aria-expanded', panel && !panel.hidden ? 'true':'false');
-      const dot=button.querySelector('.notification-dot');
-      if(dot){
-        dot.hidden=unread===0;
-        dot.textContent=unread>9?'9+':String(unread);
-      }
-    }
-    if(summary) summary.textContent=currentView === 'trash'
-      ? `${trashed.length} ${trashed.length===1?'notificação':'notificações'} na lixeira`
-      : unread ? `${unread} não lida${unread===1?'':'s'} · ${active.length} ${active.length===1?'notificação':'notificações'}` : `${active.length} ${active.length===1?'notificação':'notificações'} · nenhuma nova`;
-    if(list){
-      list.innerHTML=renderItems(active, false);
-      list.hidden=currentView !== 'active' || !active.length;
-    }
-    if(empty) {
-      empty.hidden=currentView !== 'active' || active.length > 0;
-      const title=empty.querySelector('strong');
-      const message=empty.querySelector('span');
-      if(title) title.textContent='Tudo em dia';
-      if(message) message.textContent='Você não tem notificações novas.';
-    }
-    if(trashList) {
-      trashList.innerHTML=renderItems(trashed, true);
-      trashList.hidden=currentView !== 'trash' || !trashed.length;
-    }
-    if(trashEmpty) trashEmpty.hidden=currentView !== 'trash' || trashed.length > 0;
-    if(activeTab && trashTab && toolbar) {
-      activeTab.textContent=`Notificações (${active.length})`;
-      trashTab.textContent=`Lixeira (${trashed.length})`;
-      activeTab.setAttribute('aria-selected', String(currentView === 'active'));
-      trashTab.setAttribute('aria-selected', String(currentView === 'trash'));
-      activeTab.tabIndex=currentView === 'active' ? 0 : -1;
-      trashTab.tabIndex=currentView === 'trash' ? 0 : -1;
-      clearTrashButton.hidden=currentView !== 'trash';
-      clearTrashButton.disabled=trashed.length === 0;
-    }
-    if(markRead) {
-      markRead.disabled=unread===0 || currentView !== 'active';
-      markRead.hidden=currentView !== 'active';
-    }
-    if(window.lucide) window.lucide.createIcons();
-  }
-  function openPanel(){
-    if(!panel) return;
-    panel.hidden=false; panel.classList.add('open'); panel.setAttribute('aria-hidden','false');
-    if(button) button.setAttribute('aria-expanded','true');
-    updateUI();
-  }
-  function closePanel(){
-    if(!panel) return;
-    panel.classList.remove('open'); panel.setAttribute('aria-hidden','true'); panel.hidden=true;
-    if(button) button.setAttribute('aria-expanded','false');
-  }
-  function markAllRead(){
-    const state=readState(); if(!state)return;
-    state.notifications=state.notifications.map(n=>n.deletedAt ? n : {...n,read:true});
-    if(saveState(state)) updateUI();
-  }
-  function markOneRead(id){
-    const state=readState(); if(!state)return;
-    state.notifications=state.notifications.map(n=>String(n.id)===String(id)&&!n.deletedAt?{...n,read:true}:n);
-    if(saveState(state)) updateUI();
-  }
-  function addNotification(notification){
-    const state=readState(); if(!state)return;
-    const item={id:notification?.id||`n_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,title:notification?.title||'Nova notificação',message:notification?.message||'',date:notification?.date||new Date().toISOString(),icon:notification?.icon||'bell',read:false};
-    if(state.notifications.some(n=>String(n.id)===String(item.id))) return;
-    state.notifications=[item,...state.notifications].slice(0,100);
-    if(saveState(state)) updateUI();
-  }
-  function updateNotification(id, operation){
-    const state=readState(); if(!state)return;
-    const target=state.notifications.find((n)=>String(n.id)===String(id));
-    if(!target)return;
-    if(operation==='dismiss') {
-      if(target.deletedAt)return;
-      target.deletedAt=new Date().toISOString();
-    } else if(operation==='restore') {
-      if(!target.deletedAt)return;
-      delete target.deletedAt;
-    } else if(operation==='delete') {
-      if(!target.deletedAt || !window.confirm('Excluir permanentemente esta notificação? Esta ação não pode ser desfeita.'))return;
-      state.notifications=state.notifications.filter((n)=>String(n.id)!==String(id));
-    }
-    if(saveState(state)) {
-      updateUI();
-      if (typeof window.showToast === 'function') {
-        window.showToast(operation==='dismiss' ? 'Notificação movida para a lixeira.' : operation==='restore' ? 'Notificação restaurada.' : 'Notificação excluída definitivamente.');
-      }
-    }
-  }
-  if(button){ button.addEventListener('click',e=>{
-    e.stopPropagation();
-    if (window.PrismaNavbar) window.PrismaNavbar.toggle('notifications');
-    else if(panel?.hidden) openPanel();
-    else closePanel();
-  }); }
-  if(markRead) markRead.addEventListener('click',e=>{e.preventDefault();markAllRead();});
-  if(list) list.addEventListener('click',e=>{
-    const action=e.target.closest('[data-notification-action]');
-    if(action) {
+    if (panel) panel.addEventListener('click', e => {
+      const action = e.target.closest('[data-notification-action]');
+      if (!action || !trashList?.contains(action)) return;
       e.preventDefault();
       e.stopPropagation();
       updateNotification(action.dataset.notificationId, action.dataset.notificationAction);
-      return;
-    }
-    const item=e.target.closest('[data-notification-id]');
-    if(item) markOneRead(item.dataset.notificationId);
-  });
-  if(panel) panel.addEventListener('click',e=>{
-    const action=e.target.closest('[data-notification-action]');
-    if(!action || !trashList?.contains(action))return;
-    e.preventDefault();
-    e.stopPropagation();
-    updateNotification(action.dataset.notificationId, action.dataset.notificationAction);
-  });
-  window.PrismaNotifications={getState:readState,add:addNotification,markAllRead,refresh:updateUI,_open:openPanel,_close:closePanel,open:()=>window.PrismaNavbar ? window.PrismaNavbar.open('notifications') : openPanel(),close:()=>window.PrismaNavbar ? window.PrismaNavbar.close('notifications') : closePanel(),moveToTrash:(id)=>updateNotification(id,'dismiss'),restore:(id)=>updateNotification(id,'restore'),deletePermanently:(id)=>updateNotification(id,'delete')};
-  updateUI();
-})();
-
-/* =========================================================
-   GERENCIADOR DE EXCLUSIVIDADE MÚTUA DA NAVBAR SUPERIOR
-   ========================================================= */
-(function initNavbarManager() {
-  const searchBox = document.querySelector('.search-box');
-  const searchInput = document.getElementById('globalSearchInput') || document.querySelector('.search-box input');
-  const notificationBtn = document.getElementById('notificationBtn') || document.querySelector('.notification-btn');
-  const notificationsPanel = document.getElementById('notificationsPanel');
-  const mobileMenu = document.getElementById('mobileMenu') || document.querySelector('.mobile-menu');
-  const profileBtn = document.getElementById('avatarDropdownBtn');
-  const profileDropdown = document.getElementById('profileDropdown') || document.querySelector('.profile-menu');
-  const sidebar = document.getElementById('sidebar');
-  let activeMenu = null;
-  const menuNames = ['notifications', 'profile', 'search', 'mobileMenu'];
-
-  function setExpanded(control, expanded) {
-    if (control) control.setAttribute('aria-expanded', String(expanded));
-  }
-
-  function closeMenu(menu, { restoreFocus = false } = {}) {
-    if (menu === 'notifications') {
-      if (window.PrismaNotifications?._close) window.PrismaNotifications._close();
-      else if (notificationsPanel) {
-        notificationsPanel.classList.remove('open');
-        notificationsPanel.setAttribute('aria-hidden', 'true');
-        notificationsPanel.hidden = true;
-        setExpanded(notificationBtn, false);
-      }
-    } else if (menu === 'profile' && profileDropdown) {
-      profileDropdown.classList.remove('active', 'show');
-      profileDropdown.setAttribute('aria-hidden', 'true');
-      setExpanded(profileBtn, false);
-      if (profileBtn) profileBtn.setAttribute('aria-label', 'Abrir menu do perfil');
-    } else if (menu === 'search') {
-      if (searchInput) {
-        searchInput.classList.remove('active');
-        setExpanded(searchInput, false);
-        if (document.activeElement === searchInput) searchInput.blur();
-      }
-      if (searchBox) searchBox.classList.remove('active');
-      const results = document.getElementById('globalSearchResults');
-      if (results) results.hidden = true;
-    } else if (menu === 'mobileMenu' && sidebar) {
-      sidebar.classList.remove('active', 'open');
-      const sidebarOverlay = document.getElementById('sidebarOverlay');
-      if (sidebarOverlay) {
-        sidebarOverlay.classList.remove('active');
-        sidebarOverlay.style.display = 'none';
-      }
-      setExpanded(mobileMenu, false);
-      if (typeof window.updateMobileMenuIcon === 'function') window.updateMobileMenuIcon();
-    }
-
-    if (restoreFocus) {
-      const control = menu === 'notifications' ? notificationBtn
-        : menu === 'profile' ? profileBtn
-          : menu === 'mobileMenu' ? mobileMenu : null;
-      if (control && typeof control.focus === 'function') control.focus();
-    }
-  }
-
-  function openMenu(menu) {
-    if (menu === 'notifications') {
-      if (window.PrismaNotifications?._open) window.PrismaNotifications._open();
-      else if (notificationsPanel) {
-        notificationsPanel.hidden = false;
-        notificationsPanel.classList.add('open');
-        notificationsPanel.setAttribute('aria-hidden', 'false');
-        setExpanded(notificationBtn, true);
-      }
-    } else if (menu === 'profile' && profileDropdown) {
-      profileDropdown.style.removeProperty('display');
-      profileDropdown.classList.add('show');
-      profileDropdown.setAttribute('aria-hidden', 'false');
-      setExpanded(profileBtn, true);
-      if (profileBtn) profileBtn.setAttribute('aria-label', 'Fechar menu do perfil');
-      if (typeof updateProfileDropdown === 'function') updateProfileDropdown();
-    } else if (menu === 'search' && searchInput) {
-      searchInput.classList.add('active');
-      setExpanded(searchInput, true);
-      if (searchBox) searchBox.classList.add('active');
-    } else if (menu === 'mobileMenu' && sidebar) {
-      sidebar.classList.add('open', 'active');
-      const sidebarOverlay = document.getElementById('sidebarOverlay');
-      if (sidebarOverlay) {
-        sidebarOverlay.classList.add('active');
-        sidebarOverlay.style.display = 'block';
-      }
-      setExpanded(mobileMenu, true);
-      if (typeof window.updateMobileMenuIcon === 'function') window.updateMobileMenuIcon();
-    }
-  }
-
-  function closeAllTopOverlays() {
-    menuNames.forEach((menu) => closeMenu(menu));
-    activeMenu = null;
-  }
-
-  function open(menu) {
-    if (!menuNames.includes(menu)) throw new TypeError(`Menu superior desconhecido: ${menu}`);
-    menuNames.filter((candidate) => candidate !== menu).forEach((candidate) => closeMenu(candidate));
-    activeMenu = menu;
-    openMenu(menu);
-  }
-
-  function close(menu, options = {}) {
-    if (menu && !menuNames.includes(menu)) throw new TypeError(`Menu superior desconhecido: ${menu}`);
-    if (menu && activeMenu && activeMenu !== menu) return;
-    const target = menu || activeMenu;
-    if (target) closeMenu(target, options);
-    activeMenu = null;
-  }
-
-  function toggle(menu) {
-    if (!menuNames.includes(menu)) throw new TypeError(`Menu superior desconhecido: ${menu}`);
-    if (activeMenu === menu) close(menu);
-    else open(menu);
-  }
-
-  window.PrismaNavbar = { get activeMenu() { return activeMenu; }, open, close, closeAll: closeAllTopOverlays, toggle };
-  window.closeAllTopOverlays = closeAllTopOverlays;
-
-  if (searchInput) {
-    searchInput.addEventListener('focus', () => {
-      if (activeMenu !== 'search') open('search');
     });
-    searchInput.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (activeMenu !== 'search') open('search');
-    });
-  }
+    window.PrismaNotifications = { getState: readState, add: addNotification, markAllRead, refresh: updateUI, _open: openPanel, _close: closePanel, open: () => window.PrismaNavbar ? window.PrismaNavbar.open('notifications') : openPanel(), close: () => window.PrismaNavbar ? window.PrismaNavbar.close('notifications') : closePanel(), moveToTrash: (id) => updateNotification(id, 'dismiss'), restore: (id) => updateNotification(id, 'restore'), deletePermanently: (id) => updateNotification(id, 'delete') };
+    updateUI();
+  })();
 
-  document.addEventListener('click', (e) => {
-    if (!activeMenu) return;
-    const target = e.target;
-    const insideActiveMenu = activeMenu === 'notifications'
-      ? notificationsPanel?.contains(target) || notificationBtn?.contains(target)
-      : activeMenu === 'profile'
-        ? profileDropdown?.contains(target) || profileBtn?.contains(target)
-        : activeMenu === 'search'
-          ? searchBox?.contains(target)
-          : activeMenu === 'mobileMenu'
-            ? sidebar?.contains(target) || mobileMenu?.contains(target)
-            : false;
-    if (!insideActiveMenu) {
-      closeAllTopOverlays();
+  /* =========================================================
+     GERENCIADOR DE EXCLUSIVIDADE MÚTUA DA NAVBAR SUPERIOR
+     ========================================================= */
+  (function initNavbarManager() {
+    const searchBox = document.querySelector('.search-box');
+    const searchInput = document.getElementById('globalSearchInput') || document.querySelector('.search-box input');
+    const notificationBtn = document.getElementById('notificationBtn') || document.querySelector('.notification-btn');
+    const notificationsPanel = document.getElementById('notificationsPanel');
+    const mobileMenu = document.getElementById('mobileMenu') || document.querySelector('.mobile-menu');
+    const profileBtn = document.getElementById('avatarDropdownBtn');
+    const profileDropdown = document.getElementById('profileDropdown') || document.querySelector('.profile-menu');
+    const sidebar = document.getElementById('sidebar');
+    let activeMenu = null;
+    const menuNames = ['notifications', 'profile', 'search', 'mobileMenu'];
+
+    function setExpanded(control, expanded) {
+      if (control) control.setAttribute('aria-expanded', String(expanded));
     }
-  });
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !activeMenu) return;
-    e.preventDefault();
-    const previousMenu = activeMenu;
-    close(previousMenu, { restoreFocus: previousMenu !== 'search' });
-  }, true);
+    function ensureNotifBackdrop() {
+      let bd = document.getElementById('notificationsBackdrop');
+      if (!bd) {
+        bd = document.createElement('div');
+        bd.id = 'notificationsBackdrop';
+        bd.className = 'notifications-backdrop';
+        bd.hidden = true;
+        bd.addEventListener('click', () => closeMenu('notifications'));
+        document.body.appendChild(bd);
+      }
+      return bd;
+    }
 
-  window.addEventListener('resize', () => {
-    if (window.innerWidth >= 1024 && activeMenu === 'mobileMenu') close('mobileMenu');
-  });
-})();
+    function closeMenu(menu, { restoreFocus = false } = {}) {
+      if (menu === 'notifications') {
+        if (window.PrismaNotifications?._close) window.PrismaNotifications._close();
+        else if (notificationsPanel) {
+          notificationsPanel.classList.remove('open');
+          notificationsPanel.setAttribute('aria-hidden', 'true');
+          notificationsPanel.hidden = true;
+          setExpanded(notificationBtn, false);
+        }
+        const bd = document.getElementById('notificationsBackdrop');
+        if (bd) bd.hidden = true;
+        document.body.classList.remove('prisma-notif-open');
+      } else if (menu === 'profile' && profileDropdown) {
+        profileDropdown.classList.remove('active', 'show');
+        profileDropdown.setAttribute('aria-hidden', 'true');
+        setExpanded(profileBtn, false);
+        if (profileBtn) profileBtn.setAttribute('aria-label', 'Abrir menu do perfil');
+      } else if (menu === 'search') {
+        if (searchInput) {
+          searchInput.classList.remove('active');
+          setExpanded(searchInput, false);
+          if (document.activeElement === searchInput) searchInput.blur();
+        }
+        if (searchBox) searchBox.classList.remove('active');
+        const results = document.getElementById('globalSearchResults');
+        if (results) results.hidden = true;
+      } else if (menu === 'mobileMenu' && sidebar) {
+        sidebar.classList.remove('active', 'open');
+        sidebar.setAttribute('aria-hidden', 'true');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+        if (sidebarOverlay) {
+          sidebarOverlay.classList.remove('active');
+          sidebarOverlay.style.display = 'none';
+        }
+        document.body.classList.remove('prisma-scroll-locked');
+        setExpanded(mobileMenu, false);
+        if (typeof window.updateMobileMenuIcon === 'function') window.updateMobileMenuIcon();
+      }
 
-/* =========================================================
-   Saldo Atual — carteira verde no positivo e vermelha no negativo
-   ========================================================= */
-function updateWalletColor(){
-  const card=document.querySelector('#dashboard .stat-card');
-  if(!card) return;
-  const iconWrap=card.querySelector('.stat-icon');
-  const icon=iconWrap?.querySelector('[data-lucide="wallet"], .lucide-wallet');
-  const value=Number(saldoAtual)||0;
-  const positive=value>=0;
-  if(iconWrap){
-    iconWrap.classList.remove('green','red','balance-positive','balance-negative');
-    iconWrap.classList.add(positive?'green':'red',positive?'balance-positive':'balance-negative');
-    iconWrap.setAttribute('aria-label',positive?'Saldo positivo':'Saldo negativo');
+      if (restoreFocus) {
+        const control = menu === 'notifications' ? notificationBtn
+          : menu === 'profile' ? profileBtn
+            : menu === 'mobileMenu' ? mobileMenu : null;
+        if (control && typeof control.focus === 'function') control.focus();
+      }
+    }
+
+    function openMenu(menu) {
+      if (menu === 'notifications') {
+        if (window.PrismaNotifications?._open) window.PrismaNotifications._open();
+        else if (notificationsPanel) {
+          notificationsPanel.hidden = false;
+          notificationsPanel.classList.add('open');
+          notificationsPanel.setAttribute('aria-hidden', 'false');
+          setExpanded(notificationBtn, true);
+        }
+        const bd = ensureNotifBackdrop();
+        bd.hidden = false;
+        document.body.classList.add('prisma-notif-open');
+      } else if (menu === 'profile' && profileDropdown) {
+        profileDropdown.style.removeProperty('display');
+        profileDropdown.classList.add('show');
+        profileDropdown.setAttribute('aria-hidden', 'false');
+        setExpanded(profileBtn, true);
+        if (profileBtn) profileBtn.setAttribute('aria-label', 'Fechar menu do perfil');
+        if (typeof updateProfileDropdown === 'function') updateProfileDropdown();
+      } else if (menu === 'search' && searchInput) {
+        searchInput.classList.add('active');
+        setExpanded(searchInput, true);
+        if (searchBox) searchBox.classList.add('active');
+      } else if (menu === 'mobileMenu' && sidebar) {
+        sidebar.classList.add('open', 'active');
+        sidebar.setAttribute('aria-hidden', 'false');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+        if (sidebarOverlay) {
+          sidebarOverlay.classList.add('active');
+          sidebarOverlay.style.display = 'block';
+        }
+        document.body.classList.add('prisma-scroll-locked');
+        setExpanded(mobileMenu, true);
+        const closeBtn = document.getElementById('sidebarCloseBtn');
+        if (closeBtn) {
+          try { closeBtn.focus(); } catch (_) { }
+        }
+        if (typeof window.updateMobileMenuIcon === 'function') window.updateMobileMenuIcon();
+      }
+    }
+
+    function closeAllTopOverlays() {
+      menuNames.forEach((menu) => closeMenu(menu));
+      activeMenu = null;
+    }
+
+    function open(menu) {
+      if (!menuNames.includes(menu)) throw new TypeError(`Menu superior desconhecido: ${menu}`);
+      menuNames.filter((candidate) => candidate !== menu).forEach((candidate) => closeMenu(candidate));
+      activeMenu = menu;
+      openMenu(menu);
+    }
+
+    function close(menu, options = {}) {
+      if (menu && !menuNames.includes(menu)) throw new TypeError(`Menu superior desconhecido: ${menu}`);
+      if (menu && activeMenu && activeMenu !== menu) return;
+      const target = menu || activeMenu;
+      if (target) closeMenu(target, options);
+      activeMenu = null;
+    }
+
+    function toggle(menu) {
+      if (!menuNames.includes(menu)) throw new TypeError(`Menu superior desconhecido: ${menu}`);
+      if (activeMenu === menu) close(menu);
+      else open(menu);
+    }
+
+    window.PrismaNavbar = { get activeMenu() { return activeMenu; }, open, close, closeAll: closeAllTopOverlays, toggle };
+    window.closeAllTopOverlays = closeAllTopOverlays;
+
+    if (searchInput) {
+      searchInput.addEventListener('focus', () => {
+        if (activeMenu !== 'search') open('search');
+      });
+      searchInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (activeMenu !== 'search') open('search');
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!activeMenu) return;
+      const target = e.target;
+      const insideActiveMenu = activeMenu === 'notifications'
+        ? notificationsPanel?.contains(target) || notificationBtn?.contains(target)
+        : activeMenu === 'profile'
+          ? profileDropdown?.contains(target) || profileBtn?.contains(target)
+          : activeMenu === 'search'
+            ? searchBox?.contains(target)
+            : activeMenu === 'mobileMenu'
+              ? sidebar?.contains(target) || mobileMenu?.contains(target)
+              : false;
+      if (!insideActiveMenu) {
+        closeAllTopOverlays();
+      }
+    });
+
+    const sidebarCloseBtn = document.getElementById('sidebarCloseBtn');
+    if (sidebarCloseBtn) {
+      sidebarCloseBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        close('mobileMenu', { restoreFocus: true });
+      });
+    }
+
+    if (sidebar) {
+      sidebar.querySelectorAll('.sidebar-nav [data-section]').forEach((link) => {
+        link.addEventListener('click', () => {
+          if (isMobileViewport()) close('mobileMenu');
+        });
+      });
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && activeMenu) {
+        e.preventDefault();
+        const previousMenu = activeMenu;
+        close(previousMenu, { restoreFocus: previousMenu !== 'search' });
+        return;
+      }
+
+      // Focus trap para o Drawer Mobile quando aberto
+      if (e.key === 'Tab' && activeMenu === 'mobileMenu' && sidebar) {
+        const focusables = Array.from(
+          sidebar.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+        ).filter((el) => !el.disabled && el.offsetParent !== null);
+        if (focusables.length > 0) {
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    }, true);
+
+    window.addEventListener('resize', () => {
+      if (!isMobileViewport() && activeMenu === 'mobileMenu') close('mobileMenu');
+    });
+
+    // Teclado virtual mobile (visualViewport): rolar campo ativo para área visível
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+          setTimeout(() => {
+            try { active.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) { }
+          }, 100);
+        }
+      });
+    }
+  })();
+
+  /* =========================================================
+     Saldo Atual — carteira verde no positivo e vermelha no negativo
+     ========================================================= */
+  function updateWalletColor() {
+    const card = document.querySelector('#dashboard .stat-card');
+    if (!card) return;
+    const iconWrap = card.querySelector('.stat-icon');
+    const icon = iconWrap?.querySelector('[data-lucide="wallet"], .lucide-wallet');
+    const value = Number(saldoAtual) || 0;
+    const positive = value >= 0;
+    if (iconWrap) {
+      iconWrap.classList.remove('green', 'red', 'balance-positive', 'balance-negative');
+      iconWrap.classList.add(positive ? 'green' : 'red', positive ? 'balance-positive' : 'balance-negative');
+      iconWrap.setAttribute('aria-label', positive ? 'Saldo positivo' : 'Saldo negativo');
+    }
+    if (icon) { icon.classList.remove('balance-positive', 'balance-negative'); icon.classList.add(positive ? 'balance-positive' : 'balance-negative'); }
   }
-  if(icon){ icon.classList.remove('balance-positive','balance-negative'); icon.classList.add(positive?'balance-positive':'balance-negative'); }
-}
-window.PrismaUpdateWalletColor=updateWalletColor;
+  window.PrismaUpdateWalletColor = updateWalletColor;
 
 
-/* Perfis cadastráveis — garante que cards dinâmicos acompanhem o conteúdo */
+  /* Perfis cadastráveis — garante que cards dinâmicos acompanhem o conteúdo */
 
-setTimeout(restoreSectionFromLocation, 0);
+  setTimeout(restoreSectionFromLocation, 0);
 
 }); // end DOMContentLoaded
 
-(function initAdaptiveProfileCards(){
-  function normalizeProfileCards(){
+(function initAdaptiveProfileCards() {
+  function normalizeProfileCards() {
     document.querySelectorAll('.profiles-grid .profile-card').forEach(card => {
       card.style.height = 'auto';
       card.style.minHeight = '0';
@@ -15506,10 +16602,10 @@ setTimeout(restoreSectionFromLocation, 0);
 /* =========================================================
    Auditoria de Usabilidade — camada de robustez
    ========================================================= */
-(function initUsabilityGuards(){
-  function normalize(){
+(function initUsabilityGuards() {
+  function normalize() {
     document.querySelectorAll('button').forEach(btn => {
-      if (!btn.getAttribute('type')) btn.setAttribute('type','button');
+      if (!btn.getAttribute('type')) btn.setAttribute('type', 'button');
       if (!btn.getAttribute('aria-label') && !btn.textContent.trim()) {
         const icon = btn.querySelector('[data-lucide]');
         if (icon) btn.setAttribute('aria-label', icon.getAttribute('data-lucide') || 'Ação');
@@ -15517,14 +16613,14 @@ setTimeout(restoreSectionFromLocation, 0);
     });
   }
 
-  function closeTransientUI(){
+  function closeTransientUI() {
     document.querySelectorAll(
       '.modal.show,.modal.active,.modal.open,' +
       '.dropdown.open,.dropdown.active,' +
       '.notification-panel.open,.notification-panel.active'
     ).forEach(el => {
-      el.classList.remove('show','active','open');
-      if (el.getAttribute('role') === 'dialog') el.setAttribute('aria-hidden','true');
+      el.classList.remove('show', 'active', 'open');
+      if (el.getAttribute('role') === 'dialog') el.setAttribute('aria-hidden', 'true');
     });
   }
 
@@ -15539,7 +16635,7 @@ setTimeout(restoreSectionFromLocation, 0);
 
   normalize();
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', normalize, {once:true});
+    document.addEventListener('DOMContentLoaded', normalize, { once: true });
   }
   let _usabT = 0;
   new MutationObserver(() => {

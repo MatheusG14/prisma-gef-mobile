@@ -6,7 +6,6 @@ const crypto = require('crypto');
 const net = require('net');
 const tls = require('tls');
 const zlib = require('zlib');
-const os = require('os');
 const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = __dirname;
@@ -21,14 +20,9 @@ if (IS_PROD && !process.env.DB_PATH) {
   console.error('[FATAL] DB_PATH é obrigatório em produção (aponte para o disco persistente, ex.: /var/data/prisma.sqlite).');
   process.exit(1);
 }
-const normalizedDbPath = DB_PATH.replace(/\\/g, '/').toLowerCase();
-const tempRoots = [process.env.TMPDIR, process.env.TMP, process.env.TEMP, os.tmpdir()]
-  .filter(Boolean)
-  .map((value) => path.resolve(value).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase());
-const isInsideTempRoot = tempRoots.some((root) => (
-  normalizedDbPath === root || normalizedDbPath.startsWith(root + '/')
-));
-if (IS_PROD && (/(^|\/)(tmp|var\/tmp)\//.test(normalizedDbPath) || isInsideTempRoot)) {
+if (IS_PROD && (/^\/(tmp|var\/tmp)\//.test(String(process.env.DB_PATH || '')) ||
+  /^\/(tmp|var\/tmp)\//.test(DB_PATH) ||
+  /^C:[\\/]tmp[\\/]/i.test(DB_PATH))) {
   console.error('[FATAL] DB_PATH aponta para armazenamento temporário (' + DB_PATH + '). Use o disco persistente.');
   process.exit(1);
 }
@@ -333,11 +327,12 @@ function applySecurityHeaders(res) {
     "form-action 'self'",
     "frame-ancestors 'self'",
     "object-src 'none'",
-    "img-src 'self' data: blob:",
-    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: blob: https://www.gstatic.com",
+    "font-src 'self' https://fonts.gstatic.com https://www.gstatic.com data:",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com",
-    "connect-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://www.gstatic.com https://apis.google.com",
+    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://www.gstatic.com",
+    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://apis.google.com",
     "worker-src 'self' blob:"
   ].join('; '));
   if (process.env.NODE_ENV === 'production') {

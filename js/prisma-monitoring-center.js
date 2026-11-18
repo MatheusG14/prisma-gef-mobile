@@ -439,6 +439,207 @@
         return { label: 'Excelente', statusClass: 'health-ok', badgeIcon: 'check-circle-2', dotClass: 'dot-ok' };
       }
       return { label: 'Estável', statusClass: 'health-ok', badgeIcon: 'shield-check', dotClass: 'dot-ok' };
+    },
+
+    /**
+     * Alertas de gastos em tempo real — avaliados após cada lançamento de despesa.
+     * Usa apenas dados cadastrados (despesas, receitas, orçamentos por categoria).
+     *
+     * @param {Object} params
+     * @param {Array} params.despesas
+     * @param {Array} params.receitas
+     * @param {Object} [params.categoryBudgets] mapa { categoria: limiteMensal }
+     * @param {Object} [params.lastExpense] último lançamento (para contexto)
+     * @param {number} [params.salarioMensal]
+     * @param {Date|string|null} [params.referenceDate]
+     */
+    generateExpenseAlerts({
+      despesas = [],
+      receitas = [],
+      categoryBudgets = {},
+      lastExpense = null,
+      salarioMensal = 0,
+      referenceDate = null
+    } = {}) {
+      const now = referenceDate ? (parseDateSafe(referenceDate) || new Date()) : new Date();
+      const y = now.getFullYear();
+      const m = now.getMonth();
+      const monthKey = (d) => {
+        const dt = parseDateSafe(d);
+        if (!dt) return null;
+        return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+      };
+      const currentKey = y + '-' + String(m + 1).padStart(2, '0');
+      const prevDate = new Date(y, m - 1, 1);
+      const prevKey = prevDate.getFullYear() + '-' + String(prevDate.getMonth() + 1).padStart(2, '0');
+
+      const inMonth = (list, key) => (list || []).filter((item) => monthKey(item && item.data) === key);
+      const despMes = inMonth(despesas, currentKey);
+      const despPrev = inMonth(despesas, prevKey);
+      const recMes = inMonth(receitas, currentKey);
+
+      const sum = (list) => (list || []).reduce((s, i) => s + getMoney(i && i.valor), 0);
+      const totalDesp = sum(despMes);
+      const totalDespPrev = sum(despPrev);
+      const totalRec = sum(recMes);
+      const rendaRef = totalRec > 0 ? totalRec : (Number(salarioMensal) || 0);
+
+      const byCat = (list) => {
+        const map = {};
+        (list || []).forEach((d) => {
+          const c = String((d && (d.categoria || d.category)) || 'Outros').trim() || 'Outros';
+          map[c] = (map[c] || 0) + getMoney(d && d.valor);
+        });
+        return map;
+      };
+      const catMes = byCat(despMes);
+      const catPrev = byCat(despPrev);
+
+      const alerts = [];
+      const push = (a) => alerts.push(Object.assign({
+        id: a.id,
+        tipo: 'gasto',
+        prioridade: a.prioridade || 'media',
+        titulo: a.titulo,
+        mensagem: a.mensagem,
+        categoria: a.categoria || null,
+        valor: a.valor != null ? a.valor : null,
+        icone: a.icone || 'alert-triangle',
+        destinoTela: a.destinoTela || 'despesas',
+        createdAt: now.toISOString()
+      }, a));
+
+      // 1) Déficit do mês (gastos > receitas)
+      if (rendaRef > 0 && totalDesp > rendaRef) {
+        const deficit = totalDesp - rendaRef;
+        push({
+          id: 'spend_deficit_' + currentKey,
+          prioridade: 'alta',
+          titulo: 'Gastos acima da renda no mês',
+          mensagem: `Despesas do mês (${formatBRL(totalDesp)}) superam a renda de referência (${formatBRL(rendaRef)}) em ${formatBRL(deficit)}.`,
+          valor: deficit,
+          icone: 'alert-octagon',
+          destinoTela: 'centro-financeiro'
+        });
+      } else if (rendaRef > 0 && totalDesp >= rendaRef * 0.85) {
+        push({
+          id: 'spend_near_income_' + currentKey,
+          prioridade: 'media',
+          titulo: 'Gastos próximos do limite da renda',
+          mensagem: `Você já comprometeu ${((totalDesp / rendaRef) * 100).toFixed(0)}% da renda do mês (${formatBRL(totalDesp)} de ${formatBRL(rendaRef)}).`,
+          valor: totalDesp,
+          icone: 'gauge'
+        });
+      }
+
+      // 2) Orçamento por categoria (se configurado)
+      Object.keys(categoryBudgets || {}).forEach((cat) => {
+        const limite = getMoney(categoryBudgets[cat]);
+        if (limite <= 0) return;
+        const gasto = catMes[cat] || 0;
+        if (gasto >= limite) {
+          push({
+            id: 'spend_budget_over_' + currentKey + '_' + cat,
+            prioridade: 'alta',
+            titulo: `Orçamento estourado: ${cat}`,
+            mensagem: `${formatBRL(gasto)} gastos em ${cat} neste mês (limite ${formatBRL(limite)}).`,
+            categoria: cat,
+            valor: gasto - limite,
+            icone: 'circle-alert'
+          });
+        } else if (gasto >= limite * 0.8) {
+          push({
+            id: 'spend_budget_warn_' + currentKey + '_' + cat,
+            prioridade: 'media',
+            titulo: `Orçamento em alerta: ${cat}`,
+            mensagem: `${((gasto / limite) * 100).toFixed(0)}% do limite de ${cat} já utilizado (${formatBRL(gasto)} / ${formatBRL(limite)}).`,
+            categoria: cat,
+            valor: gasto,
+            icone: 'activity'
+          });
+        }
+      });
+
+      // 3) Concentração em uma categoria (>40% dos gastos do mês)
+      const entries = Object.entries(catMes).sort((a, b) => b[1] - a[1]);
+      if (totalDesp > 0 && entries.length) {
+        const [topCat, topVal] = entries[0];
+        const pct = (topVal / totalDesp) * 100;
+        if (pct >= 40 && topVal >= 50) {
+          push({
+            id: 'spend_concentration_' + currentKey + '_' + topCat,
+            prioridade: pct >= 55 ? 'alta' : 'media',
+            titulo: `Concentração alta em ${topCat}`,
+            mensagem: `${pct.toFixed(0)}% dos gastos do mês estão em ${topCat} (${formatBRL(topVal)}).`,
+            categoria: topCat,
+            valor: topVal,
+            icone: 'pie-chart'
+          });
+        }
+      }
+
+      // 4) Pico vs mês anterior (categoria subiu >40% e valor relevante)
+      entries.slice(0, 5).forEach(([cat, val]) => {
+        const prev = catPrev[cat] || 0;
+        if (prev > 0 && val >= prev * 1.4 && val - prev >= 30) {
+          push({
+            id: 'spend_spike_' + currentKey + '_' + cat,
+            prioridade: 'media',
+            titulo: `Alta em ${cat} vs mês anterior`,
+            mensagem: `${cat}: ${formatBRL(val)} neste mês contra ${formatBRL(prev)} no anterior (+${formatBRL(val - prev)}).`,
+            categoria: cat,
+            valor: val - prev,
+            icone: 'trending-up'
+          });
+        }
+      });
+
+      // 5) Lançamento unitário atípico (≥ 25% da renda ou ≥ 30% dos gastos do mês)
+      if (lastExpense) {
+        const v = getMoney(lastExpense.valorTotal != null ? lastExpense.valorTotal : lastExpense.valor);
+        const cat = String(lastExpense.categoria || 'Outros').trim() || 'Outros';
+        if (v > 0 && ((rendaRef > 0 && v >= rendaRef * 0.25) || (totalDesp > 0 && v >= totalDesp * 0.3 && v >= 80))) {
+          push({
+            id: 'spend_large_tx_' + (lastExpense.data || '') + '_' + v + '_' + cat,
+            prioridade: 'alta',
+            titulo: 'Lançamento de valor elevado',
+            mensagem: `Despesa de ${formatBRL(v)} em ${cat} é atípica em relação à sua renda/gastos do mês.`,
+            categoria: cat,
+            valor: v,
+            icone: 'zap'
+          });
+        }
+      }
+
+      // 6) Ritmo de gastos (dia do mês vs % da renda já gasta)
+      if (rendaRef > 0 && totalDesp > 0) {
+        const day = now.getDate();
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        const expectedPct = day / daysInMonth;
+        const actualPct = totalDesp / rendaRef;
+        if (actualPct > expectedPct + 0.15 && actualPct >= 0.5) {
+          push({
+            id: 'spend_pace_' + currentKey,
+            prioridade: 'media',
+            titulo: 'Ritmo de gastos acima do esperado',
+            mensagem: `No dia ${day}, você já usou ${(actualPct * 100).toFixed(0)}% da renda; o ritmo proporcional seria ~${(expectedPct * 100).toFixed(0)}%.`,
+            valor: totalDesp,
+            icone: 'timer'
+          });
+        }
+      }
+
+      const prioRank = { alta: 0, media: 1, baixa: 2 };
+      alerts.sort((a, b) => (prioRank[a.prioridade] ?? 9) - (prioRank[b.prioridade] ?? 9));
+
+      return {
+        total: alerts.length,
+        altas: alerts.filter((a) => a.prioridade === 'alta').length,
+        mes: currentKey,
+        totalDespesasMes: totalDesp,
+        totalReceitasMes: totalRec,
+        alerts
+      };
     }
   };
 
